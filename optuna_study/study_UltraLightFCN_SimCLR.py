@@ -41,7 +41,7 @@ from utils.helpers import clear_cuda_cache, save_best_callback, infer_subset_fro
 from utils.loss_functions import NTXentLoss
 from models.UltraLightFCN_SimCLR import UltraLightEncoder, ProjectionHead, SimCLRModel
 
-
+torch.multiprocessing.set_sharing_strategy("file_system")
 
 # -------------------------------------------------------------------------
 # 0) Reproducibility
