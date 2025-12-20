@@ -1,0 +1,10 @@
+data/
+temp/
+dataset/
+suplement/
+test/
+.idea/
+.vscode/
+.venv/
+__pycache__/
+visualize_overlays.py

@@ -1,0 +1,226 @@
+import gc
+import os
+import re
+from pathlib import Path
+from typing import List, Optional, Tuple
+
+import optuna
+import torch
+import random
+import segmentation_models_pytorch as smp
+
+from utils.edge_detectors import sobel_detector, canny_detector, prewitt_detector, laplacian_detector
+from utils.loss_functions import BCEDiceLoss, BCEDiceTverskyLoss, BCEDiceFocalLoss
+
+# Factory function to get the loss function based on the name
+def get_loss_function(loss_name='BCEDiceLoss', **kwargs):
+    """
+    Factory function to get the loss function based on the name.
+    """
+    if loss_name == 'BCEDiceLoss':
+        return BCEDiceLoss(
+            pos_weight=kwargs.get('pos_weight', None),
+            bce_weight=kwargs.get('bce_weight', 0.5),
+            dice_weight=kwargs.get('dice_weight', 0.5)
+        )
+    elif loss_name == 'BCELoss':
+        return torch.nn.BCEWithLogitsLoss(
+            pos_weight=kwargs.get('pos_weight', None)
+        )
+    elif loss_name == 'DiceLoss':
+        return smp.losses.DiceLoss(
+            mode="binary",
+            from_logits=True,
+            smooth=1e-6
+        )
+    elif loss_name == 'TverskyLoss':
+        return smp.losses.TverskyLoss(
+            mode="binary",
+            from_logits=True,
+            alpha=kwargs.get('alpha', 0.3),
+            beta=kwargs.get('beta', 0.7),
+            gamma=kwargs.get('gamma', 1.0),
+            smooth=1e-6
+        )
+    elif loss_name == 'FocalLoss':
+        return smp.losses.FocalLoss(
+            mode="binary",
+            alpha=kwargs.get('alpha', 0.25),
+            gamma=kwargs.get('gamma', 2),
+        )
+    elif loss_name == 'BCEDiceTverskyLoss':
+        return BCEDiceTverskyLoss(
+            pos_weight=kwargs.get('pos_weight', None),
+            bce_weight=kwargs.get('bce_weight', 0.5),
+            dice_weight=kwargs.get('dice_weight', 0.3),
+            tversky_weight=kwargs.get('tversky_weight', 0.2),
+            alpha=kwargs.get('alpha', 0.3),
+            beta=kwargs.get('beta', 0.7),
+        )
+
+    elif loss_name == 'BCEDiceFocalLoss':
+        return BCEDiceFocalLoss(
+            pos_weight=kwargs.get('pos_weight', None),
+            bce_weight=kwargs.get('bce_weight', 0.4),
+            dice_weight=kwargs.get('dice_weight', 0.3),
+            focal_weight=kwargs.get('focal_weight', 0.3),
+            alpha_focal=kwargs.get('alpha', 0.25),
+            gamma_focal=kwargs.get('gamma', 2.0),
+        )
+    else:
+        raise ValueError(f"Loss function {loss_name} not supported")
+
+# Factory function to get the model based on the name
+def get_model(model_name='base'):
+    """
+    Factory function to get the model based on the name.
+    """
+    if model_name == 'base':
+        from models.UltraLightFCN_base import UltraLightFCN
+        return UltraLightFCN
+    # elif model_name == 'se':
+    #     from test_models.UltraLightFCN_SE_model import UltraLightFCN_SE
+    #     return UltraLightFCN_SE
+    # elif model_name == 'cbam':
+    #     from test_models.UltraLightFCN_CBAM_model import UltraLightFCN_CBAM
+    #     return UltraLightFCN_CBAM
+    elif model_name == 'dlv3p':
+        return smp.DeepLabV3Plus
+    elif model_name == 'unet':
+        return smp.Unet
+    else:
+        raise ValueError(f"Model {model_name} not supported")
+
+# Function to clear CUDA cache and collect garbage
+def clear_cuda_cache(study, trial):
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    gc.collect()
+
+# Callback to save the best trial's state_dict
+def save_best_callback(study: optuna.Study, trial: optuna.trial.FrozenTrial):
+    trial.user_attrs["state_dict"] = trial.user_attrs.get("state_dict", None)
+    if study.best_trial.number == trial.number:
+        Path("checkpoints").mkdir(exist_ok=True)
+        torch.save(
+            trial.user_attrs["state_dict"],
+            f"checkpoints/{study.study_name}-best_trial{trial.number}.pth"
+        )
+        print(f"[ckpt] Saved the weight of the best trail in checkpoints/{study.study_name}-best_trial{trial.number}.pth")
+
+# Function to build 2D sine-cosine positional embeddings for self-attention
+def build_2d_sincos_pos_emb(H, W, C, device):
+    assert C % 4 == 0, "SA d_model (channels) should be divisible by 4 for sin-cos PE."
+    y = torch.linspace(0, 1, H, device=device)
+    x = torch.linspace(0, 1, W, device=device)
+    yy, xx = torch.meshgrid(y, x, indexing='ij')
+    dim = C // 4
+    omega = 1.0 / (10000 ** (torch.arange(dim, device=device) / dim))
+    pos = torch.cat([
+        torch.sin(yy[..., None] * omega),
+        torch.cos(yy[..., None] * omega),
+        torch.sin(xx[..., None] * omega),
+        torch.cos(xx[..., None] * omega),
+    ], dim=-1).view(H * W, C)  # (N, C)
+    return pos
+
+
+# Function to infer subset from filename
+def infer_subset_from_filename(name: str) -> str:
+    m = re.compile(r"^(PV\d{2})[-_]").match(name)
+    return m.group(1) if m else "OTHER"
+
+# Function to make a reduced file list based on custom policy
+def make_reduced_file_list(
+    data_dir: str,
+    max_total: Optional[int] = 5000,
+    seed: int = 42,
+    keep_all_pv01: bool = True,
+    balance_subsets: Tuple[str, str] = ("PV03", "PV08"),
+) -> List[str]:
+    """
+    Deterministically select a reduced set of filenames from data_dir with a custom policy:
+
+    Policy:
+      1) Keep all PV01 files (if keep_all_pv01=True).
+      2) Fill the remaining budget by sampling equally from PV03 and PV08 (balance_subsets).
+      3) OTHER subsets are ignored by default (can be added later if needed).
+
+    Notes:
+      - If max_total is None: returns all files (no reduction), but still shuffles deterministically.
+      - If PV01 count exceeds max_total and keep_all_pv01=True, we keep PV01 only up to max_total
+        (otherwise it is impossible to satisfy max_total).
+
+    Returns:
+      List[str]: selected filenames (shuffled deterministically).
+    """
+    exts = (".png", ".jpg", ".jpeg")
+    all_files = [f for f in os.listdir(data_dir) if f.lower().endswith(exts)]
+    if not all_files:
+        return []
+
+    rng = random.Random(seed)
+
+    # Bucket files by subset prefix (uses your existing helper)
+    buckets = {}
+    for f in all_files:
+        subset = infer_subset_from_filename(f)
+        buckets.setdefault(subset, []).append(f)
+
+    # Shuffle each bucket deterministically
+    for subset_files in buckets.values():
+        rng.shuffle(subset_files)
+
+    pv01_files = buckets.get("PV01", [])
+    a_files = buckets.get(balance_subsets[0], [])
+    b_files = buckets.get(balance_subsets[1], [])
+
+    # If no max_total -> return everything (but deterministic ordering)
+    if max_total is None:
+        selected = list(all_files)
+        rng.shuffle(selected)
+        return selected
+
+    selected: List[str] = []
+
+    # 1) Keep all PV01 (or as many as possible if PV01 > max_total)
+    if keep_all_pv01:
+        if len(pv01_files) >= max_total:
+            # Can't keep all PV01 and still respect max_total; keep first max_total deterministically
+            selected = pv01_files[:max_total]
+            rng.shuffle(selected)
+            return selected
+        selected.extend(pv01_files)
+    else:
+        # If you ever want to sample PV01 too, you'd implement that here.
+        pass
+
+    remaining = max_total - len(selected)
+    if remaining <= 0:
+        rng.shuffle(selected)
+        return selected
+
+    # 2) Split remaining budget equally between PV03 and PV08
+    half = remaining // 2
+    rest = remaining - 2 * half  # remainder 0 or 1
+
+    take_a = min(half + rest, len(a_files))  # give remainder to the first subset
+    take_b = min(half, len(b_files))
+
+    selected.extend(a_files[:take_a])
+    selected.extend(b_files[:take_b])
+
+    # 3) If one subset doesn't have enough files, top-up from the other
+    shortfall = remaining - (take_a + take_b)
+    if shortfall > 0:
+        # Try to fill from whichever still has capacity
+        a_left = a_files[take_a:]
+        b_left = b_files[take_b:]
+        topup_pool = a_left + b_left
+        # Already shuffled (bucket shuffle), but for safety:
+        rng.shuffle(topup_pool)
+        selected.extend(topup_pool[:shortfall])
+
+    # Final deterministic shuffle (so the loader sees a mixed sequence)
+    rng.shuffle(selected)
+    return selected
