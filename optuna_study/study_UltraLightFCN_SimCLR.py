@@ -53,21 +53,21 @@ set_global_seed(42, deterministic=False)
 # 1) Constants / configuration
 # -------------------------------------------------------------------------
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-DATA_ROOT = "../dataset/train"   # image-only folder for SimCLR
+DATA_ROOT = "/workspace/UltraLightFCN/dataset/train"   # image-only folder for SimCLR
 
 SIMCLR_BS = 256
-EPOCHS = 30
+EPOCHS = 50
 DROP_LAST = True
 
 # Reduced pool settings (speed-up for HPO)
-REDUCE_MAX_TOTAL = 1800
+REDUCE_MAX_TOTAL = 4000  # max total images in reduced pool
 
 # Pretrain validation split (within the reduced pool)
 PRETRAIN_VAL_FRAC = 0.10
 
 # HPO stability knobs
-WARMUP_EPOCHS = 5      # do not allow pruning before this epoch index is reached
-LAST_K_EPOCHS = 5      # objective = average of last K validation ratios
+WARMUP_EPOCHS = 8      # do not allow pruning before this epoch index is reached
+LAST_K_EPOCHS = 10     # objective = average of last K validation ratios
 
 # Store deterministic file lists (pool/train/val) for reproducibility
 RUN_DIR = Path("runs/simclr_hpo")
@@ -211,8 +211,8 @@ def objective(trial: optuna.Trial) -> float:
         shuffle=True,
         pin_memory=True,
         drop_last=drop_last_trial,
-        # num_workers=12,
-        # persistent_workers=True,
+        num_workers=8,
+        persistent_workers=True,
     )
     val_loader = DataLoader(
         simclr_val_ds,
@@ -220,8 +220,8 @@ def objective(trial: optuna.Trial) -> float:
         shuffle=False,
         pin_memory=True,
         drop_last=False,
-        # num_workers=12,
-        # persistent_workers=True,
+        num_workers=8,
+        persistent_workers=True,
     )
 
     # 4.3 Step-based schedule setup
@@ -395,7 +395,7 @@ def main():
     # Robust pruner for noisy SSL objectives
     pruner = optuna.pruners.MedianPruner(
         n_startup_trials=10,
-        n_warmup_steps=5,
+        n_warmup_steps=8,
         interval_steps=1,
     )
 
@@ -411,7 +411,7 @@ def main():
     study.optimize(
         objective,
         n_trials=100,
-        timeout=12 * 60 * 60,
+        timeout=24 * 60 * 60,
         callbacks=[clear_cuda_cache, save_best_callback],
     )
 
