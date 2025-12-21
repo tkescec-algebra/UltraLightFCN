@@ -83,14 +83,24 @@ class SimCLRSolarPanelDataset(Dataset):
         self.data_dir = data_dir
         self.simclr_tf = transform if transform is not None else get_simclr_transforms(image_size)
 
+        exts = (".png", ".jpg", ".jpeg")
+
         if files is not None:
-            self.images = list(files)
+            self.images = [
+                f for f in list(files)
+                if f.lower().endswith(exts) and (not f.lower().endswith("_label.png"))
+            ]
         else:
-            exts = (".png", ".jpg", ".jpeg")
-            self.images = [f for f in os.listdir(data_dir) if f.lower().endswith(exts)]
+            self.images = [
+                f for f in os.listdir(data_dir)
+                if f.lower().endswith(exts) and (not f.lower().endswith("_label.png"))
+            ]
 
         if len(self.images) == 0:
             raise RuntimeError(f"No images found in {data_dir}")
+
+        if any(f.lower().endswith("_label.png") for f in self.images):
+            raise RuntimeError("Mask leakage: *_label.png found in SimCLRSolarPanelDataset input list.")
 
     def __len__(self):
         return len(self.images)

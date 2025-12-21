@@ -37,7 +37,7 @@ from timm.scheduler import CosineLRScheduler
 
 from utils.dataset import SimCLRSolarPanelDataset
 from utils.repro import set_global_seed, GLOBAL_SEED
-from utils.helpers import clear_cuda_cache, save_best_callback, infer_subset_from_filename, make_reduced_file_list
+from utils.helpers import clear_cuda_cache, infer_subset_from_filename, make_reduced_file_list
 from utils.loss_functions import NTXentLoss
 from models.UltraLightFCN_SimCLR import UltraLightEncoder, ProjectionHead, SimCLRModel
 
@@ -75,7 +75,6 @@ RUN_DIR.mkdir(parents=True, exist_ok=True)
 POOL_LIST_PATH = RUN_DIR / "pretrain_pool_files.txt"
 TRAIN_LIST_PATH = RUN_DIR / "pretrain_train_files.txt"
 VAL_LIST_PATH = RUN_DIR / "pretrain_val_files.txt"
-
 
 # -------------------------------------------------------------------------
 # 2) Helper: save/load file lists to guarantee reproducibility
@@ -213,6 +212,7 @@ def objective(trial: optuna.Trial) -> float:
         drop_last=drop_last_trial,
         num_workers=8,
         persistent_workers=True,
+        prefetch_factor=4,
     )
     val_loader = DataLoader(
         simclr_val_ds,
@@ -222,6 +222,7 @@ def objective(trial: optuna.Trial) -> float:
         drop_last=False,
         num_workers=8,
         persistent_workers=True,
+        prefetch_factor=4,
     )
 
     # 4.3 Step-based schedule setup
@@ -258,6 +259,9 @@ def objective(trial: optuna.Trial) -> float:
 
     model = SimCLRModel(encoder, proj_head).to(DEVICE)
 
+    if DEVICE.type == "cuda":
+        model = model.to(memory_format=torch.channels_last)
+
     opt = torch.optim.AdamW(model.parameters(), lr=simclr_lr, weight_decay=wd)
 
     scheduler = CosineLRScheduler(
@@ -272,7 +276,7 @@ def objective(trial: optuna.Trial) -> float:
 
     crit = NTXentLoss(temperature=simclr_temperature, device=DEVICE)
 
-    scaler = GradScaler()
+    scaler = GradScaler(enabled=(DEVICE.type == "cuda"))
 
     # Log metadata (useful for debugging / thesis reproducibility appendix)
     trial.set_user_attr("n_train", int(len(simclr_train_ds)))
@@ -303,6 +307,10 @@ def objective(trial: optuna.Trial) -> float:
 
             xi = xi.to(DEVICE, non_blocking=True)
             xj = xj.to(DEVICE, non_blocking=True)
+
+            if DEVICE.type == "cuda":
+                xi = xi.to(memory_format=torch.channels_last)
+                xj = xj.to(memory_format=torch.channels_last)
 
             opt.zero_grad(set_to_none=True)
 
@@ -341,6 +349,10 @@ def objective(trial: optuna.Trial) -> float:
 
                 xi = xi.to(DEVICE, non_blocking=True)
                 xj = xj.to(DEVICE, non_blocking=True)
+
+                if DEVICE.type == "cuda":
+                    xi = xi.to(memory_format=torch.channels_last)
+                    xj = xj.to(memory_format=torch.channels_last)
 
                 with autocast(device_type="cuda" if DEVICE.type == "cuda" else "cpu"):
                     zi = model(xi)
@@ -412,7 +424,7 @@ def main():
         objective,
         n_trials=100,
         timeout=24 * 60 * 60,
-        callbacks=[clear_cuda_cache, save_best_callback],
+        callbacks=[clear_cuda_cache],
     )
 
     print("\nBest hyperparameters:")

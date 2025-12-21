@@ -118,9 +118,9 @@ class UltraLightEncoder(nn.Module):
         return self.params['enc_channels'][0]
 
     def forward(self, x: torch.Tensor):
-        x1 = self.block1(x)  # skip (B, C1, H, W)
-        x2 = self.dsconv2(x1)  # (B, C2, H/2, W/2)
-        x3 = self.dsconv3(x2)  # (B, C3, H/4, W/4)
+        x1 = self.block1(x)     # skip (B, C1, H, W)
+        x2 = self.dsconv2(x1)   # (B, C2, H/2, W/2)
+        x3 = self.dsconv3(x2)   # (B, C3, H/4, W/4)
         x4 = self.dilconv4(x3)  # (B, C4, H/4, W/4)
         x5 = self.dilconv5(x4)  # (B, C5, H/4, W/4)
 
@@ -170,10 +170,10 @@ class SimCLRModel(nn.Module):
         self.gap = nn.AdaptiveAvgPool2d(1)
         self.proj_head = proj_head
     def forward(self, x):
-        feat, _ = self.encoder(x)                     # (B,64,H/4,W/4)
-        pooled = self.gap(feat).view(x.size(0), -1) # (B,64)
-        z = self.proj_head(pooled)                 # (B,64)
-        return F.normalize(z, dim=1)               # L2 normalize
+        feat, _ = self.encoder(x)                       # (B,64,H/4,W/4)
+        pooled = self.gap(feat).view(x.size(0), -1)     # (B,64)
+        z = self.proj_head(pooled)                      # (B,64)
+        return F.normalize(z, dim=1)                    # L2 normalize
 
 # -----------------------------------------------------------------------------
 # 5) Segmentation Model (fine-tune)

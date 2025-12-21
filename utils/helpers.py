@@ -155,7 +155,10 @@ def make_reduced_file_list(
       List[str]: selected filenames (shuffled deterministically).
     """
     exts = (".png", ".jpg", ".jpeg")
-    all_files = [f for f in os.listdir(data_dir) if f.lower().endswith(exts)]
+    all_files = [
+        f for f in os.listdir(data_dir)
+        if f.lower().endswith(exts) and (not f.lower().endswith("_label.png"))
+    ]
     if not all_files:
         return []
 
@@ -223,4 +226,9 @@ def make_reduced_file_list(
 
     # Final deterministic shuffle (so the loader sees a mixed sequence)
     rng.shuffle(selected)
+
+    # Final hard safety
+    if any(f.lower().endswith("_label.png") for f in selected):
+        raise RuntimeError("Mask leakage: *_label.png present in reduced file list.")
+
     return selected
