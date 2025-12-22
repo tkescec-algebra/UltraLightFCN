@@ -69,13 +69,6 @@ PRETRAIN_VAL_FRAC = 0.10
 WARMUP_EPOCHS = 8      # do not allow pruning before this epoch index is reached
 LAST_K_EPOCHS = 10     # objective = average of last K validation ratios
 
-# NEW: AMP config (explicit dtype)
-USE_CUDA = (DEVICE.type == "cuda")          # NEW
-AMP_DTYPE = torch.float16                   # NEW: consider torch.bfloat16 if supported and stable for you
-
-# NEW: torch.compile toggle (PyTorch 2.x)
-ENABLE_TORCH_COMPILE = True                 # NEW: set False if you hit compile issues
-
 # Store deterministic file lists (pool/train/val) for reproducibility
 RUN_DIR = Path("runs/simclr_hpo")
 RUN_DIR.mkdir(parents=True, exist_ok=True)
@@ -264,28 +257,10 @@ def objective(trial: optuna.Trial) -> float:
     # IMPORTANT: ProjectionHead signature is (in_dim, hidden_dim, out_dim)
     proj_head = ProjectionHead(encoder.out_channels, hidden_dim=proj_hidden_dim, out_dim=proj_out_dim).to(DEVICE)
 
-    model = SimCLRModel(encoder, proj_head).to(DEVICE)
+    model = SimCLRModel(encoder, proj_head).to(DEVICE, memory_format=torch.channels_last)
 
-    if USE_CUDA:
-        model = model.to(memory_format=torch.channels_last)
+    opt = torch.optim.AdamW(model.parameters(), lr=simclr_lr, weight_decay=wd)
 
-    # NEW: optional torch.compile for speed (PyTorch 2.x)
-    if USE_CUDA and ENABLE_TORCH_COMPILE:
-        try:
-            model = torch.compile(model, mode="max-autotune")
-        except Exception as e:
-            print(f"[Trial {trial.number}] torch.compile failed, continuing without compile. Error: {e}")
-
-    # CHANGED: use fused AdamW when possible (faster on CUDA in newer PyTorch)
-    try:  # NEW
-        opt = torch.optim.AdamW(
-            model.parameters(),
-            lr=simclr_lr,
-            weight_decay=wd,
-            fused=USE_CUDA, # NEW
-        )
-    except TypeError:
-        opt = torch.optim.AdamW(model.parameters(), lr=simclr_lr, weight_decay=wd)
 
     scheduler = CosineLRScheduler(
         optimizer=opt,
@@ -313,8 +288,6 @@ def objective(trial: optuna.Trial) -> float:
     trial.set_user_attr("proj_hidden_dim", int(proj_hidden_dim))
     trial.set_user_attr("proj_out_dim", int(proj_out_dim))
     trial.set_user_attr("max_grad_norm", float(max_grad_norm))
-    trial.set_user_attr("amp_dtype", str(AMP_DTYPE))  # NEW
-    trial.set_user_attr("torch_compile", bool(ENABLE_TORCH_COMPILE and USE_CUDA))  # NEW
 
     # 4.5 Train + val proxy per epoch
     epoch_val_ratios: List[float] = []
@@ -335,18 +308,12 @@ def objective(trial: optuna.Trial) -> float:
             if B < 2:
                 continue
 
-            # CHANGED: one single transfer+layout call (avoids extra re-layout per batch)
-            if USE_CUDA:  # CHANGED
-                xi = xi.to(DEVICE, non_blocking=True, memory_format=torch.channels_last)  # CHANGED
-                xj = xj.to(DEVICE, non_blocking=True, memory_format=torch.channels_last)  # CHANGED
-            else:
-                xi = xi.to(DEVICE)
-                xj = xj.to(DEVICE)
+            xi = xi.to(DEVICE, non_blocking=True, memory_format=torch.channels_last)
+            xj = xj.to(DEVICE, non_blocking=True, memory_format=torch.channels_last)
 
             opt.zero_grad(set_to_none=True)
 
-            # CHANGED: autocast only enabled on CUDA, explicit dtype
-            with autocast(device_type="cuda", dtype=AMP_DTYPE, enabled=USE_CUDA):  # CHANGED
+            with autocast(device_type="cuda"):
                 zi = model(xi)
                 zj = model(xj)
                 loss = crit(zi, zj)
@@ -384,16 +351,11 @@ def objective(trial: optuna.Trial) -> float:
                 if B < 2:
                     continue
 
-                # CHANGED: one single transfer+layout call
-                if USE_CUDA:  # CHANGED
-                    xi = xi.to(DEVICE, non_blocking=True, memory_format=torch.channels_last)  # CHANGED
-                    xj = xj.to(DEVICE, non_blocking=True, memory_format=torch.channels_last)  # CHANGED
-                else:
-                    xi = xi.to(DEVICE)
-                    xj = xj.to(DEVICE)
+                xi = xi.to(DEVICE, non_blocking=True, memory_format=torch.channels_last)
+                xj = xj.to(DEVICE, non_blocking=True, memory_format=torch.channels_last)
 
                 # CHANGED: autocast only on CUDA
-                with autocast(device_type="cuda", dtype=AMP_DTYPE, enabled=USE_CUDA):  # CHANGED
+                with autocast(device_type="cuda"):  # CHANGED
                     zi = model(xi)
                     zj = model(xj)
                     val_loss = crit(zi, zj).item()
