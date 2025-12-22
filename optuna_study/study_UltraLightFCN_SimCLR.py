@@ -56,7 +56,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DATA_ROOT = "/workspace/UltraLightFCN/dataset/train"   # image-only folder for SimCLR
 
 SIMCLR_BS = 256
-EPOCHS = 50
+EPOCHS = 40
 DROP_LAST = True
 
 # Reduced pool settings (speed-up for HPO)
