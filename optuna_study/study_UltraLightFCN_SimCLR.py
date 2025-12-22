@@ -422,7 +422,7 @@ def main():
 
     study.optimize(
         objective,
-        n_trials=100,
+        n_trials=72,
         timeout=24 * 60 * 60,
         callbacks=[clear_cuda_cache],
     )
