@@ -257,6 +257,7 @@ def retrain_and_knn_one(
         drop_last=drop_last_trial,
         num_workers=8,
         persistent_workers=True,
+        prefetch_factor=4,
     )
     val_loader = DataLoader(
         simclr_val_ds,
@@ -266,6 +267,7 @@ def retrain_and_knn_one(
         drop_last=False,
         num_workers=8,
         persistent_workers=True,
+        prefetch_factor=4,
     )
 
     # --- Scheduling in update-steps ---
