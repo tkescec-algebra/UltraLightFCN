@@ -64,11 +64,11 @@ CHANNELS = 40
 IMAGE_SIZE = 256
 
 # IMPORTANT: Must match the folder used to create the split lists in HPO
-DATA_ROOT = " /workspace/UltraLightFCN/dataset/train"
+DATA_ROOT = "/workspace/UltraLightFCN/dataset/train"
 
 # Fixed HPO split lists (must exist)
 TRAIN_LIST_PATH = "/workspace/UltraLightFCN/optuna_study/runs/simclr_hpo/pretrain_train_files.txt"
-VAL_LIST_PATH = " /workspace/UltraLightFCN/optuna_study/runs/simclr_hpo/pretrain_val_files.txt"
+VAL_LIST_PATH = "/workspace/UltraLightFCN/optuna_study/runs/simclr_hpo/pretrain_val_files.txt"
 
 # Training budget (match HPO)
 SIMCLR_BS = 256
