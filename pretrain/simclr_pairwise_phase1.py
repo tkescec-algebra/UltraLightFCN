@@ -60,7 +60,7 @@ set_global_seed(GLOBAL_SEED, deterministic=False)
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 MODEL_NAME = "UltraLightFCN"
-CHANNELS = 40
+CHANNELS = 3
 IMAGE_SIZE = 256
 
 # IMPORTANT: Must match the folder used to create the split lists in HPO
