@@ -46,7 +46,7 @@ torch.multiprocessing.set_sharing_strategy("file_system")
 # -------------------------------------------------------------------------
 # 0) Reproducibility
 # -------------------------------------------------------------------------
-set_global_seed(42, deterministic=False)
+set_global_seed(GLOBAL_SEED, deterministic=False)
 
 
 # -------------------------------------------------------------------------
@@ -257,10 +257,9 @@ def objective(trial: optuna.Trial) -> float:
     # IMPORTANT: ProjectionHead signature is (in_dim, hidden_dim, out_dim)
     proj_head = ProjectionHead(encoder.out_channels, hidden_dim=proj_hidden_dim, out_dim=proj_out_dim).to(DEVICE)
 
-    model = SimCLRModel(encoder, proj_head).to(DEVICE, memory_format=torch.channels_last)
+    model = SimCLRModel(encoder, proj_head).to(DEVICE)
 
     opt = torch.optim.AdamW(model.parameters(), lr=simclr_lr, weight_decay=wd)
-
 
     scheduler = CosineLRScheduler(
         optimizer=opt,
@@ -308,12 +307,12 @@ def objective(trial: optuna.Trial) -> float:
             if B < 2:
                 continue
 
-            xi = xi.to(DEVICE, non_blocking=True, memory_format=torch.channels_last)
-            xj = xj.to(DEVICE, non_blocking=True, memory_format=torch.channels_last)
+            xi = xi.to(DEVICE, non_blocking=True)
+            xj = xj.to(DEVICE, non_blocking=True)
 
             opt.zero_grad(set_to_none=True)
 
-            with autocast(device_type="cuda"):
+            with autocast(device_type="cuda" if DEVICE.type == "cuda" else "cpu"):
                 zi = model(xi)
                 zj = model(xj)
                 loss = crit(zi, zj)
@@ -351,11 +350,11 @@ def objective(trial: optuna.Trial) -> float:
                 if B < 2:
                     continue
 
-                xi = xi.to(DEVICE, non_blocking=True, memory_format=torch.channels_last)
-                xj = xj.to(DEVICE, non_blocking=True, memory_format=torch.channels_last)
+                xi = xi.to(DEVICE, non_blocking=True)
+                xj = xj.to(DEVICE, non_blocking=True)
 
                 # CHANGED: autocast only on CUDA
-                with autocast(device_type="cuda"):  # CHANGED
+                with autocast(device_type="cuda" if DEVICE.type == "cuda" else "cpu"):  # CHANGED
                     zi = model(xi)
                     zj = model(xj)
                     val_loss = crit(zi, zj).item()

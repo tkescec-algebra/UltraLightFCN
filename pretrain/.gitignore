@@ -1,8 +1,4 @@
-checkpoints/
-pairwise_results/
 wandb/
-logs/
-umap_pretrain/
 .idea/
 .vscode/
 .venv/

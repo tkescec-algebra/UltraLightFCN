@@ -1,10 +1,37 @@
+"""
+Phase1: Augmentation sensitivity heatmap for SimCLR pretraining (UltraLightEncoder).
+
+Methodology-safe alignment with HPO/study code:
+- Uses the SAME reduced pretraining pool and the SAME fixed train/val split as HPO
+  (pretrain_train_files.txt / pretrain_val_files.txt).
+- Uses the SAME proxy metric as HPO for ranking:
+    val_ratio = NTXentLoss / ln(2B - 1)
+  and objective = average of last K epochs (K=10).
+- Keeps hyperparameters FIXED to the final HP set selected after HPO + kNN verification.
+- Uses SimCLR-faithful "pairwise policy":
+  For each pair (t1, t2), we build ONE augmentation distribution (policy).
+  Both views are sampled independently from that SAME policy (dataset calls tf(img) twice).
+
+Dependencies:
+- utils/transforms_simclr_pairwise.py  (SimCLR-faithful pairwise policy builder)
+- utils/dataset.py -> SimCLRSolarPanelDataset (supports files=...)
+- utils/loss_functions.py -> NTXentLoss
+- utils/repro.py -> set_global_seed, seed_worker, GLOBAL_SEED
+- models/UltraLightFCN_SimCLR.py -> UltraLightEncoder, ProjectionHead, SimCLRModel
+- utils/metrics_simclr.py -> simclr_alignment, simclr_uniformity, batch_ssim_windowed
+- utils/transforms.py -> RGBOnlyColorJitter
+"""
+
+from __future__ import annotations
+
 import os
 import math
 import csv
 import time
+from pathlib import Path
+from typing import Dict, Any, List, Tuple
 
 import torch
-import wandb
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 from torch.amp import autocast, GradScaler
@@ -13,87 +40,168 @@ from timm.scheduler import CosineLRScheduler
 from models.UltraLightFCN_SimCLR import UltraLightEncoder, ProjectionHead, SimCLRModel
 from utils.dataset import SimCLRSolarPanelDataset
 from utils.loss_functions import NTXentLoss
-from utils.repro import set_global_seed, seed_worker
+from utils.repro import set_global_seed, seed_worker, GLOBAL_SEED
 
 from utils.transforms_simclr_pairwise import BaseAugCfg, build_simclr_pairwise_transforms
-from utils.metrics_simclr import simclr_alignment, simclr_uniformity, batch_ssim_windowed
 from utils.transforms import RGBOnlyColorJitter
 
+from utils.metrics_simclr import simclr_alignment, simclr_uniformity, batch_ssim_windowed
 
-# =========================
-# Speed / Numerical knobs
-# =========================
-torch.backends.cudnn.benchmark = True
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
-torch.set_float32_matmul_precision("high")
 
-torch.multiprocessing.set_sharing_strategy("file_system")
+# -------------------------------------------------------------------------
+# 0) Reproducibility (match HPO/study style)
+# -------------------------------------------------------------------------
+set_global_seed(GLOBAL_SEED, deterministic=False)
 
-# Metrics cadence
+
+# -------------------------------------------------------------------------
+# 1) Constants / configuration (align with HPO where relevant)
+# -------------------------------------------------------------------------
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+MODEL_NAME = "UltraLightFCN"
+CHANNELS = 3
+IMAGE_SIZE = 256
+
+# IMPORTANT: Must match the folder used to create the split lists in HPO
+DATA_ROOT = "../dataset/train"
+
+# Fixed HPO split lists (must exist)
+TRAIN_LIST_PATH = "../optuna_study/runs/simclr_hpo/pretrain_train_files.txt"
+VAL_LIST_PATH = "../optuna_study/runs/simclr_hpo/pretrain_val_files.txt"
+
+# Training budget (match HPO)
+SIMCLR_BS = 256
+EPOCHS = 3
+DROP_LAST = True
+
+# -------------------------------------------------------------------------
+# 2) Best hyperparameters (FILL with your chosen final HP set)
+# -------------------------------------------------------------------------
+# NOTE: keep these synchronized with the best-trial selected after top10 retrain + kNN.
+SIMCLR_LR = 0.0025675349295728707
+SIMCLR_WD = 0.00012114033209597344
+SIMCLR_TEMPERATURE = 0.05060246552597808
+
+WARMUP_RATIO = 0.23653367813158288   # <-- replace with best_trial warmup_ratio
+LR_MIN = 1e-6         # match HPO
+MAX_GRAD_NORM = 2.0   # <-- replace with best_trial max_grad_norm
+
+PROJ_HIDDEN_DIM = 256  # <-- replace with best_trial proj_hidden_dim
+PROJ_OUT_DIM = 128      # <-- replace with best_trial proj_out_dim
+
+# Objective: avg last K validation ratios (match HPO)
+LAST_K_EPOCHS = 10
+
+
+# -------------------------------------------------------------------------
+# 3) Phase1 grid definition (includes grayscale)
+# -------------------------------------------------------------------------
+OPS = ["identity", "color", "gray", "blur", "hflip", "vflip", "rotate"]
+SEEDS = [GLOBAL_SEED]  # Phase1: 1 seed for full grid
+
+
+# -------------------------------------------------------------------------
+# 4) Diagnostics cadence (does not affect objective)
+# -------------------------------------------------------------------------
 METRICS_EVERY = 20
-SSIM_EVERY = 100  # SSIM every 100 updates
+SSIM_EVERY = 100
 
-# SSIM on GPU (no GPU->CPU copies)
 SSIM_ON_CPU = False
-
-# Standard SSIM settings (windowed)
 SSIM_DATA_RANGE = 1.0
 SSIM_WINDOW = 11
 SSIM_SIGMA = 1.5
 SSIM_K1 = 0.01
 SSIM_K2 = 0.03
 
-
-DEVICE        = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-DATA_ROOT     = "../dataset"
-
-MODEL_NAME    = "UltraLightFCN"
-EDGE_DETECTOR = None
-CHANNELS      = 3
-IMAGE_SIZE    = 256
-
-SIMCLR_BS     = 256
-DROP_LAST     = True
-TOTAL_EPOCHS  = 50
-
-SIMCLR_LR          = 0.0024554497897962607
-SIMCLR_TEMPERATURE = 0.060705096152236224
-SIMCLR_WD          = 1.584361249525883e-06
-
-WARMUP_PCT    = 0.10
-LR_MIN        = 1e-5
-MAX_GRAD_NORM = 1.0
-
 UNIFORMITY_T = 2.0
 UNIFORMITY_SUBSAMPLE = 512
 
 
-RESULTS_DIR = "pairwise_results"
-OUT_CSV = os.path.join(RESULTS_DIR, "simclr_pairwise_results.csv")
+# -------------------------------------------------------------------------
+# 5) Output
+# -------------------------------------------------------------------------
+RESULTS_DIR = Path("pairwise_results")
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+OUT_CSV = RESULTS_DIR / "simclr_pairwise_phase1.csv"
+CKPT_DIR = RESULTS_DIR / "checkpoints"
+CKPT_DIR.mkdir(parents=True, exist_ok=True)
 
 CSV_FIELDNAMES = [
     "seed",
     "t1",
     "t2",
-    "epoch",
-    "loss",
-    "alignment",
-    "uniformity",
-    "ssim",
+    "epochs",
     "steps_per_epoch",
     "total_updates",
-    "metrics_count",
+    "warmup_steps",
+    # Objective/proxy
+    "val_ratio_avg_last_k",
+    "val_ratio_best",
+    "val_ratio_last",
+    # Diagnostics (train)
+    "train_loss_last",
+    "train_alignment_last",
+    "train_uniformity_last",
+    "train_ssim_last",
+    # Runtime/paths
     "wall_time_sec",
+    "final_ckpt_path",
 ]
 
 
+# -------------------------------------------------------------------------
+# 6) Helpers
+# -------------------------------------------------------------------------
+def _load_list(path: str) -> List[str]:
+    with open(path, "r", encoding="utf-8") as f:
+        return [line.strip() for line in f if line.strip()]
+
+
 def steps_per_epoch(n_samples: int, batch_size: int, drop_last: bool) -> int:
-    return max(1, n_samples // batch_size) if drop_last else max(1, math.ceil(n_samples / batch_size))
+    if n_samples <= 0:
+        return 0
+    if drop_last:
+        return max(1, n_samples // batch_size)
+    return max(1, math.ceil(n_samples / batch_size))
 
 
-def build_model():
-    encoder = UltraLightEncoder(in_channels=CHANNELS, params={
+def canonical_pair(t1: str, t2: str) -> Tuple[str, str]:
+    """(color, blur) == (blur, color)."""
+    return tuple(sorted([t1, t2]))
+
+
+def _load_completed(csv_path: Path) -> set[tuple[int, str, str]]:
+    if not csv_path.exists() or csv_path.stat().st_size == 0:
+        return set()
+    done: set[tuple[int, str, str]] = set()
+    with open(csv_path, "r", newline="", encoding="utf-8") as f:
+        r = csv.DictReader(f)
+        for row in r:
+            try:
+                seed = int(row.get("seed", "0"))
+                t1 = row.get("t1", "")
+                t2 = row.get("t2", "")
+                if t1 and t2:
+                    done.add((seed, t1, t2))
+            except Exception:
+                continue
+    return done
+
+
+def _append_csv_row(csv_path: Path, row: Dict[str, Any]) -> None:
+    need_header = (not csv_path.exists()) or (csv_path.stat().st_size == 0)
+    with open(csv_path, "a", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES)
+        if need_header:
+            w.writeheader()
+        w.writerow({k: row.get(k, "") for k in CSV_FIELDNAMES})
+
+
+def build_model() -> SimCLRModel:
+    # Must match the encoder definition used in HPO
+    model_params = {
         "enc_channels": [16, 16, 32, 32, 64],
         "enc_kernel_sizes": [3, 3, 3, 3, 3],
         "enc_strides": [1, 2, 2, 1, 1],
@@ -106,88 +214,68 @@ def build_model():
         "sa_shifted": True,
         "sa_heads": 4,
         "sa_dropout": 0.1,
-    }).to(DEVICE)
+    }
 
-    proj_head = ProjectionHead(in_dim=encoder.out_channels, hidden_dim=128, out_dim=64).to(DEVICE)
+    encoder = UltraLightEncoder(in_channels=CHANNELS, params=model_params).to(DEVICE)
+    proj_head = ProjectionHead(
+        in_dim=encoder.out_channels,
+        hidden_dim=PROJ_HIDDEN_DIM,
+        out_dim=PROJ_OUT_DIM,
+    ).to(DEVICE)
+
     model = SimCLRModel(encoder, proj_head).to(DEVICE)
-
-    if DEVICE.type == "cuda":
-        model = model.to(memory_format=torch.channels_last)
 
     return model
 
 
-def _load_completed_pairs(csv_path: str) -> set[tuple[int, str, str]]:
-    """Return a set of (seed, t1, t2) already present in the CSV."""
-    if not os.path.exists(csv_path):
-        return set()
+@torch.no_grad()
+def evaluate_val_ratio(model: SimCLRModel, loader: DataLoader, crit: NTXentLoss) -> float:
+    """
+    Computes mean val_ratio over validation:
+      val_ratio = NTXentLoss / ln(2B - 1)
+    """
+    model.eval()
+    running, seen = 0.0, 0
 
-    completed = set()
-    with open(csv_path, "r", newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            try:
-                seed = int(row.get("seed", "0"))
-                t1 = row.get("t1", "")
-                t2 = row.get("t2", "")
-                if t1 and t2:
-                    completed.add((seed, t1, t2))
-            except Exception:
-                continue
-    return completed
+    for xi, xj, *_ in tqdm(loader, desc="Val proxy", leave=False):
+        B = xi.size(0)
+        if B < 2:
+            continue
 
+        xi = xi.to(DEVICE, non_blocking=True)
+        xj = xj.to(DEVICE, non_blocking=True)
 
-def _append_csv_row(csv_path: str, fieldnames: list[str], row: dict):
-    """Append a single row to CSV; write header if file does not exist or is empty."""
-    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+        with autocast(device_type="cuda" if DEVICE.type == "cuda" else "cpu"):
+            zi = model(xi)
+            zj = model(xj)
+            loss = float(crit(zi, zj).item())
 
-    need_header = (not os.path.exists(csv_path)) or (os.path.getsize(csv_path) == 0)
+        baseline = math.log(2 * B - 1)
+        running += (loss / baseline) * B
+        seen += B
 
-    with open(csv_path, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        if need_header:
-            writer.writeheader()
-        writer.writerow({k: row.get(k, "") for k in fieldnames})
+    return float(running / max(1, seen))
 
 
-def run_one_pair(t1: str, t2: str, base_cfg: BaseAugCfg, seed: int = 42):
-    set_global_seed(seed, deterministic=False, strict=False)
-    training_type = "edge" if CHANNELS == 4 else "rgb"
+# -------------------------------------------------------------------------
+# 7) One run: train+val for a single pair
+# -------------------------------------------------------------------------
+def run_one_pair(
+    t1: str,
+    t2: str,
+    seed: int,
+    train_files: List[str],
+    val_files: List[str],
+) -> Dict[str, Any]:
+    # Repro: match HPO style (fast, non-deterministic)
+    set_global_seed(seed, deterministic=False)
+
+    # Canonicalize pair to avoid duplicates
+    t1, t2 = canonical_pair(t1, t2)
     run_tag = f"PAIR_{t1}+{t2}"
 
-    wandb.init(
-        mode="offline",
-        name=f"{MODEL_NAME}({training_type})-{run_tag}-seed{seed}",
-        project="UltraLightFCN_SimCLR-phase1-pairwise",
-        entity="tomislav-kescec-algebra",
-        config={
-            "phase": "phase1_pairwise",
-            "t1": t1,
-            "t2": t2,
-            "base_cfg": vars(base_cfg),
-            "seed": seed,
-            "bs": SIMCLR_BS,
-            "epochs": TOTAL_EPOCHS,
-            "metrics_every": METRICS_EVERY,
-            "ssim_every": SSIM_EVERY,
-            "tf32": True,
-            "fused_adamw": (DEVICE.type == "cuda"),
-            "ssim_on_cpu": SSIM_ON_CPU,
-            "ssim_window": SSIM_WINDOW,
-            "ssim_sigma": SSIM_SIGMA,
-            "ssim_k1": SSIM_K1,
-            "ssim_k2": SSIM_K2,
-        },
-        reinit=True,
-    )
-
-    wandb.define_metric("global_step")
-    wandb.define_metric("simclr/*", step_metric="global_step")
-    wandb.define_metric("simclr/loss", summary="min")
-    wandb.define_metric("simclr/alignment", summary="min")
-    wandb.define_metric("simclr/uniformity", summary="min")
-    wandb.define_metric("simclr/ssim", summary="mean")
-
+    # Build SimCLR-faithful policy for this pair (HPO-aligned probabilities)
+    base_cfg = BaseAugCfg(crop_scale_min=0.4)  # MUST match HPO scale min=0.4
     tf = build_simclr_pairwise_transforms(
         image_size=IMAGE_SIZE,
         cfg=base_cfg,
@@ -196,23 +284,36 @@ def run_one_pair(t1: str, t2: str, base_cfg: BaseAugCfg, seed: int = 42):
         RGBOnlyColorJitter=RGBOnlyColorJitter,
     )
 
-    g = torch.Generator().manual_seed(seed)
-    train_ds = SimCLRSolarPanelDataset(
-        f"{DATA_ROOT}/train",
-        edge_detector=EDGE_DETECTOR,
-        channels=CHANNELS,
-        image_size=IMAGE_SIZE,
-        transform=tf,
-    )
-    n_full = len(train_ds)
+    # Datasets/loaders using FIXED HPO lists
+    train_ds = SimCLRSolarPanelDataset(DATA_ROOT, image_size=IMAGE_SIZE, transform=tf, files=train_files)
+    val_ds = SimCLRSolarPanelDataset(DATA_ROOT, image_size=IMAGE_SIZE, transform=tf, files=val_files)
 
+    n_train = len(train_ds)
+    drop_last_train = DROP_LAST
+    if DROP_LAST and n_train < SIMCLR_BS:
+        drop_last_train = False
+
+    g = torch.Generator().manual_seed(seed)
     num_workers = 8
+
     train_loader = DataLoader(
         train_ds,
         batch_size=SIMCLR_BS,
         shuffle=True,
         pin_memory=True,
-        drop_last=DROP_LAST,
+        drop_last=drop_last_train,
+        num_workers=num_workers,
+        persistent_workers=(num_workers > 0),
+        prefetch_factor=2 if num_workers > 0 else None,
+        worker_init_fn=seed_worker,
+        generator=g,
+    )
+    val_loader = DataLoader(
+        val_ds,
+        batch_size=SIMCLR_BS,
+        shuffle=False,
+        pin_memory=True,
+        drop_last=False,
         num_workers=num_workers,
         persistent_workers=(num_workers > 0),
         prefetch_factor=2 if num_workers > 0 else None,
@@ -220,17 +321,21 @@ def run_one_pair(t1: str, t2: str, base_cfg: BaseAugCfg, seed: int = 42):
         generator=g,
     )
 
-    spe = steps_per_epoch(n_full, SIMCLR_BS, DROP_LAST)
-    total_updates = TOTAL_EPOCHS * spe
-    warmup_steps = max(1, int(WARMUP_PCT * total_updates))
+    spe = steps_per_epoch(n_train, SIMCLR_BS, drop_last_train)
+    total_updates = EPOCHS * spe
+    if total_updates <= 0:
+        raise RuntimeError(f"total_updates<=0 for {run_tag} (n_train={n_train}, bs={SIMCLR_BS})")
 
+    warmup_steps = max(1, int(WARMUP_RATIO * total_updates))
+    warmup_steps = min(warmup_steps, max(1, total_updates - 1))
+
+    # Model/opt/sched/loss (AdamW without fused to match HPO)
     model = build_model()
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=SIMCLR_LR,
         weight_decay=SIMCLR_WD,
-        fused=(DEVICE.type == "cuda"),
     )
 
     scheduler = CosineLRScheduler(
@@ -244,12 +349,22 @@ def run_one_pair(t1: str, t2: str, base_cfg: BaseAugCfg, seed: int = 42):
     )
 
     criterion = NTXentLoss(temperature=SIMCLR_TEMPERATURE, device=DEVICE)
-    scaler = GradScaler()
+    scaler = GradScaler(enabled=(DEVICE.type == "cuda"))
 
+    # Tracking
     global_update = 0
-    last = None
+    val_hist: List[float] = []
+    best_val = float("inf")
 
-    for epoch in range(TOTAL_EPOCHS):
+    # Diagnostics (train, last epoch averages)
+    last_train_loss = float("nan")
+    last_train_align = float("nan")
+    last_train_uni = float("nan")
+    last_train_ssim = float("nan")
+
+    start_time = time.time()
+
+    for epoch in range(EPOCHS):
         model.train()
 
         run_loss = 0.0
@@ -257,20 +372,18 @@ def run_one_pair(t1: str, t2: str, base_cfg: BaseAugCfg, seed: int = 42):
         run_uni = 0.0
         run_ssim = 0.0
 
-        # counts:
-        metrics_count = 0         # alignment/uniformity count
-        ssim_count = 0            # ssims count
         iters = 0
+        metrics_count = 0
+        ssim_count = 0
 
-        for xi, xj, *_ in tqdm(train_loader, desc=f"{run_tag} | {epoch+1}/{TOTAL_EPOCHS}", leave=False):
+        for xi, xj, *_ in tqdm(train_loader, desc=f"{run_tag} | Train {epoch+1}/{EPOCHS}", leave=False):
             iters += 1
+            B = xi.size(0)
+            if B < 2:
+                continue
 
             xi = xi.to(DEVICE, non_blocking=True)
             xj = xj.to(DEVICE, non_blocking=True)
-
-            if DEVICE.type == "cuda":
-                xi = xi.to(memory_format=torch.channels_last)
-                xj = xj.to(memory_format=torch.channels_last)
 
             optimizer.zero_grad(set_to_none=True)
 
@@ -290,11 +403,8 @@ def run_one_pair(t1: str, t2: str, base_cfg: BaseAugCfg, seed: int = 42):
 
             run_loss += float(loss.item())
 
-            # =========================
-            # Metrics (alignment/uniformity) every 20
-            # SSIM every 100
-            # =========================
-            if (global_update % METRICS_EVERY) == 0:
+            # Alignment / uniformity diagnostics
+            if (METRICS_EVERY > 0) and (global_update % METRICS_EVERY) == 0:
                 with torch.no_grad():
                     align = simclr_alignment(zi.detach(), zj.detach())
 
@@ -308,7 +418,8 @@ def run_one_pair(t1: str, t2: str, base_cfg: BaseAugCfg, seed: int = 42):
                 run_uni += float(uni.item())
                 metrics_count += 1
 
-            if (global_update % SSIM_EVERY) == 0:
+            # SSIM diagnostic
+            if (SSIM_EVERY > 0) and (global_update % SSIM_EVERY) == 0:
                 with torch.no_grad():
                     if SSIM_ON_CPU:
                         ssim_val = batch_ssim_windowed(
@@ -321,7 +432,6 @@ def run_one_pair(t1: str, t2: str, base_cfg: BaseAugCfg, seed: int = 42):
                             k2=SSIM_K2,
                         )
                     else:
-                        # Keep fp32 for stability; still on GPU and fast enough at 1/100 updates
                         ssim_val = batch_ssim_windowed(
                             xi.detach().float(),
                             xj.detach().float(),
@@ -331,53 +441,37 @@ def run_one_pair(t1: str, t2: str, base_cfg: BaseAugCfg, seed: int = 42):
                             k1=SSIM_K1,
                             k2=SSIM_K2,
                         )
-
                 run_ssim += float(ssim_val.item())
                 ssim_count += 1
 
-        avg_loss = run_loss / max(1, iters)
-        avg_align = run_align / max(1, metrics_count)
-        avg_uni = run_uni / max(1, metrics_count)
-        avg_ssim = run_ssim / max(1, ssim_count)
+        # Train epoch averages (for logging only)
+        last_train_loss = run_loss / max(1, iters)
+        last_train_align = (run_align / max(1, metrics_count)) if metrics_count > 0 else float("nan")
+        last_train_uni = (run_uni / max(1, metrics_count)) if metrics_count > 0 else float("nan")
+        last_train_ssim = (run_ssim / max(1, ssim_count)) if ssim_count > 0 else float("nan")
 
-        wandb.log({
-            "global_step": global_update,
-            "simclr/epoch": epoch + 1,
-            "simclr/loss": avg_loss,
-            "simclr/alignment": avg_align,
-            "simclr/uniformity": avg_uni,
-            "simclr/ssim": avg_ssim,
-            "simclr/lr": optimizer.param_groups[0]["lr"],
-            "simclr/metrics_count": metrics_count,
-            "simclr/ssim_count": ssim_count,
-        })
+        # Validation proxy (HPO-compatible)
+        val_ratio = evaluate_val_ratio(model, val_loader, criterion)
+        val_hist.append(val_ratio)
+        best_val = min(best_val, val_ratio)
 
-        last = {
-            "epoch": epoch + 1,
-            "loss": avg_loss,
-            "alignment": avg_align,
-            "uniformity": avg_uni,
-            "ssim": avg_ssim,
-            "steps_per_epoch": spe,
-            "total_updates": total_updates,
-            "metrics_count": metrics_count,
-        }
+        print(
+            f"[{run_tag}] Epoch {epoch+1}/{EPOCHS} | "
+            f"train_loss={last_train_loss:.4f} | val_ratio={val_ratio:.4f} | "
+            f"lr_now={optimizer.param_groups[0]['lr']:.3e}"
+        )
 
-    # =========================
-    # Save final weights (.pth)
-    # =========================
-    ckpt_dir = os.path.join(RESULTS_DIR, "checkpoints")
-    os.makedirs(ckpt_dir, exist_ok=True)
+    # Objective: avg last K epochs
+    k = min(LAST_K_EPOCHS, len(val_hist))
+    avg_last_k = float(sum(val_hist[-k:]) / k)
+    last_val = float(val_hist[-1]) if val_hist else float("nan")
 
-    final_path = os.path.join(
-        ckpt_dir,
-        f"simclr_{MODEL_NAME}_seed{seed}_{t1}+{t2}_final.pth"
-    )
-
+    # Save final checkpoint (optional but useful)
+    final_path = CKPT_DIR / f"simclr_{MODEL_NAME}_seed{seed}_{t1}+{t2}_final.pth"
     torch.save(
         {
-            "model_state_dict": model.state_dict(),  # full SimCLR (encoder + projection head)
-            "encoder_state_dict": model.encoder.state_dict(),  # just encoder (often enough for embeddings)
+            "model_state_dict": model.state_dict(),
+            "encoder_state_dict": model.encoder.state_dict(),
             "proj_head_state_dict": model.proj_head.state_dict(),
             "meta": {
                 "seed": seed,
@@ -386,63 +480,112 @@ def run_one_pair(t1: str, t2: str, base_cfg: BaseAugCfg, seed: int = 42):
                 "image_size": IMAGE_SIZE,
                 "channels": CHANNELS,
                 "model_name": MODEL_NAME,
+                "epochs": EPOCHS,
+                "bs": SIMCLR_BS,
+                "hp": {
+                    "lr": SIMCLR_LR,
+                    "wd": SIMCLR_WD,
+                    "temperature": SIMCLR_TEMPERATURE,
+                    "warmup_ratio": WARMUP_RATIO,
+                    "lr_min": LR_MIN,
+                    "max_grad_norm": MAX_GRAD_NORM,
+                    "proj_hidden_dim": PROJ_HIDDEN_DIM,
+                    "proj_out_dim": PROJ_OUT_DIM,
+                },
+                "objective": {
+                    "avg_last_k_val_ratio": avg_last_k,
+                    "best_val_ratio": best_val,
+                    "last_val_ratio": last_val,
+                    "k": k,
+                },
             },
         },
-        final_path,
+        str(final_path),
     )
-    print(f"[SAVE] Final weights saved to: {final_path}")
-    wandb.finish()
-    return last
+
+    wall_time = time.time() - start_time
+
+    return {
+        "seed": seed,
+        "t1": t1,
+        "t2": t2,
+        "epochs": EPOCHS,
+        "steps_per_epoch": spe,
+        "total_updates": total_updates,
+        "warmup_steps": warmup_steps,
+        "val_ratio_avg_last_k": avg_last_k,
+        "val_ratio_best": best_val,
+        "val_ratio_last": last_val,
+        "train_loss_last": last_train_loss,
+        "train_alignment_last": last_train_align,
+        "train_uniformity_last": last_train_uni,
+        "train_ssim_last": last_train_ssim,
+        "wall_time_sec": wall_time,
+        "final_ckpt_path": str(final_path),
+    }
 
 
+# -------------------------------------------------------------------------
+# 8) Main
+# -------------------------------------------------------------------------
 def main():
-    ops = ["identity", "color", "blur", "hflip", "vflip", "rotate"]
+    # Safety checks (match study/HPO assumptions)
+    if not os.path.exists(TRAIN_LIST_PATH) or not os.path.exists(VAL_LIST_PATH):
+        raise FileNotFoundError(
+            f"Missing split lists. Expected:\n"
+            f"  {TRAIN_LIST_PATH}\n  {VAL_LIST_PATH}\n"
+            f"Run HPO split creation first."
+        )
 
-    base_cfg = BaseAugCfg(
-        crop_scale_min=0.2,
-        cj_strength=0.4,
-        cj_hue=0.04,
-        blur_k=5,
-        blur_sigma_min=0.1,
-        blur_sigma_max=2.0,
-        rot_deg=15,
-        rot_min_abs_deg=1.0,
-    )
+    train_files = _load_list(TRAIN_LIST_PATH)
+    val_files = _load_list(VAL_LIST_PATH)
 
-    seed = 42
+    if len(train_files) == 0 or len(val_files) == 0:
+        raise RuntimeError("Empty train/val file list(s).")
 
-    completed = _load_completed_pairs(OUT_CSV)
-    os.makedirs(RESULTS_DIR, exist_ok=True)
+    # Prepare unique canonical pairs only (i <= j) to avoid duplicates
+    pairs: List[Tuple[str, str]] = []
+    for i, a in enumerate(OPS):
+        for j, b in enumerate(OPS):
+            if j < i:
+                continue
+            pairs.append(canonical_pair(a, b))
+    pairs = sorted(list(set(pairs)))
 
-    for t1 in ops:
-        for t2 in ops:
+    completed = _load_completed(OUT_CSV)
+
+    print(f"[Info] DATA_ROOT: {DATA_ROOT}")
+    print(f"[Info] Train files: {len(train_files)} | Val files: {len(val_files)}")
+    print(f"[Info] Unique pairs: {len(pairs)} | Seeds: {SEEDS}")
+    print(f"[Info] CSV: {OUT_CSV}")
+
+    for seed in SEEDS:
+        for (t1, t2) in pairs:
             key = (seed, t1, t2)
             if key in completed:
-                print(f"[SKIP] {t1}+{t2} (seed={seed}) already in CSV")
+                print(f"[SKIP] seed={seed} {t1}+{t2} already in CSV")
                 continue
 
-            start = time.time()
-            metrics = run_one_pair(t1, t2, base_cfg, seed=seed)
-            wall_time_sec = time.time() - start
+            print(f"\n=== RUN seed={seed} pair={t1}+{t2} ===")
+            row = run_one_pair(
+                t1=t1,
+                t2=t2,
+                seed=seed,
+                train_files=train_files,
+                val_files=val_files,
+            )
 
-            row = {
-                "seed": seed,
-                "t1": t1,
-                "t2": t2,
-                **metrics,
-                "wall_time_sec": wall_time_sec,
-            }
-
-            _append_csv_row(OUT_CSV, CSV_FIELDNAMES, row)
+            _append_csv_row(OUT_CSV, row)
             completed.add(key)
 
             print(
-                f"[DONE] {t1}+{t2} | loss={metrics['loss']:.4f} "
-                f"align={metrics['alignment']:.4f} uni={metrics['uniformity']:.4f} "
-                f"ssim={metrics['ssim']:.4f} | wrote CSV row"
+                f"[DONE] seed={seed} {t1}+{t2} | "
+                f"avg_last_k_val_ratio={row['val_ratio_avg_last_k']:.6f} "
+                f"(best={row['val_ratio_best']:.6f}, last={row['val_ratio_last']:.6f}) | "
+                f"time={row['wall_time_sec']:.1f}s"
             )
 
-    print(f"✓ CSV (incremental): {OUT_CSV}")
+    print(f"\n✓ Completed. Results saved to: {OUT_CSV}")
 
 
 if __name__ == "__main__":
