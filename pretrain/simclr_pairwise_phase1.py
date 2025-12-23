@@ -60,19 +60,19 @@ set_global_seed(GLOBAL_SEED, deterministic=False)
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 MODEL_NAME = "UltraLightFCN"
-CHANNELS = 3
+CHANNELS = 40
 IMAGE_SIZE = 256
 
 # IMPORTANT: Must match the folder used to create the split lists in HPO
-DATA_ROOT = "../dataset/train"
+DATA_ROOT = " /workspace/UltraLightFCN/dataset/train"
 
 # Fixed HPO split lists (must exist)
-TRAIN_LIST_PATH = "../optuna_study/runs/simclr_hpo/pretrain_train_files.txt"
-VAL_LIST_PATH = "../optuna_study/runs/simclr_hpo/pretrain_val_files.txt"
+TRAIN_LIST_PATH = "/workspace/UltraLightFCN/optuna_study/runs/simclr_hpo/pretrain_train_files.txt"
+VAL_LIST_PATH = " /workspace/UltraLightFCN/optuna_study/runs/simclr_hpo/pretrain_val_files.txt"
 
 # Training budget (match HPO)
 SIMCLR_BS = 256
-EPOCHS = 3
+EPOCHS = 40
 DROP_LAST = True
 
 # -------------------------------------------------------------------------
