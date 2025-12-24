@@ -197,10 +197,13 @@ def objective(trial: optuna.Trial) -> float:
     # -----------------------
     # Model init + Phase2 encoder load
     # -----------------------
-    model = UltraLightFCN(in_channels=CHANNELS, num_classes=1, params=model_params).to(DEVICE)
+    model = UltraLightFCN(in_channels=CHANNELS, num_classes=1, params=model_params)
 
     # Fixed init from Phase2
     load_phase2_encoder_into_ultralight(model, PHASE2_CKPT, verbose=(trial.number == 0))
+
+    # Move to device
+    model = model.to(DEVICE)
 
     # Finetune-only optimizer: encoder smaller LR, decoder base LR
     enc_params, dec_params = split_encoder_decoder_params(model)
@@ -348,7 +351,7 @@ def main():
 
     study = optuna.create_study(
         direction="maximize",
-        study_name=f"UltraLightFCN_seg_finetune_sofdice_RGB",
+        study_name=f"UltraLightFCN_seg_finetune_softdice_RGB",
         storage="sqlite:///UltraLightFCN_study.db",
         load_if_exists=True,
         pruner=optuna.pruners.MedianPruner(
