@@ -16,7 +16,7 @@ import torch
 import optuna
 from tqdm import tqdm
 from torch.utils.data import DataLoader
-from torch.amp import autocast
+from torch.amp import autocast, GradScaler
 
 from models.UltraLightFCN_base import UltraLightFCN
 from utils.helpers import get_loss_function, clear_cuda_cache
@@ -205,6 +205,10 @@ def objective(trial: optuna.Trial) -> float:
     # Move to device
     model = model.to(DEVICE)
 
+    # AMP only on CUDA
+    use_amp = (DEVICE.type == "cuda")
+    scaler = GradScaler("cuda", enabled=use_amp)
+
     # Finetune-only optimizer: encoder smaller LR, decoder base LR
     enc_params, dec_params = split_encoder_decoder_params(model)
     optimizer = torch.optim.AdamW(
@@ -225,22 +229,15 @@ def objective(trial: optuna.Trial) -> float:
         min_lr=1e-6,
     )
 
-    scaler = torch.amp.GradScaler("cuda", enabled=torch.cuda.is_available())
-
     # -----------------------
-    # Checkpointing (best/last) by soft avg_last_k
+    # Selection by soft avg_last_k
     # -----------------------
-    ckpt_dir = os.path.join(
-        "optuna_outputs",
-        "seg_finetune_softdice",
-        f"trial_{trial.number:04d}",
-    )
-    os.makedirs(ckpt_dir, exist_ok=True)
-    best_path = os.path.join(ckpt_dir, "best.pth")
-    last_path = os.path.join(ckpt_dir, "last.pth")
-
     last_k = deque(maxlen=AVG_LAST_K)
+
     best_avg_last_k = -1.0
+    best_epoch = -1
+    best_val_soft = -1.0
+    best_val_hard05 = -1.0
 
     # -----------------------
     # Train loop
@@ -257,7 +254,7 @@ def objective(trial: optuna.Trial) -> float:
             masks = masks.to(DEVICE, non_blocking=True)
 
             optimizer.zero_grad(set_to_none=True)
-            with autocast(device_type="cuda" if DEVICE.type == "cuda" else "cpu"):
+            with autocast(device_type="cuda", enabled=use_amp):
                 logits = model(images)
                 loss = criterion(logits, masks)
 
@@ -274,7 +271,7 @@ def objective(trial: optuna.Trial) -> float:
                 images = images.to(DEVICE, non_blocking=True)
                 masks = masks.to(DEVICE, non_blocking=True)
 
-                with autocast(device_type="cuda" if DEVICE.type == "cuda" else "cpu"):
+                with autocast(device_type="cuda", enabled=use_amp):
                     logits = model(images)
 
                 soft_sum += float(calculate_dice(logits, masks, thr=None))
@@ -288,62 +285,33 @@ def objective(trial: optuna.Trial) -> float:
         last_k.append(val_soft)
         avg_last_k = float(sum(last_k) / len(last_k))
 
-        # Save last checkpoint (overwrite every epoch)
-        torch.save(
-            {
-                "epoch": epoch + 1,
-                "model": model.state_dict(),
-                "trial_params": dict(trial.params),
-                "metrics": {
-                    "val_soft_dice": val_soft,
-                    "val_hard_dice@0.5": val_hard05,
-                    "avg_last_k_soft": avg_last_k,
-                    "avg_last_k_k": AVG_LAST_K,
-                },
-                "hpo": {
-                    "selection_metric": "avg_last_k_soft_dice",
-                    "epochs": EPOCHS,
-                    "loss_name": loss_name,
-                    "phase2_ckpt": PHASE2_CKPT,
-                },
-            },
-            last_path,
-        )
-
-        # Save best by avg_last_k (soft)
+        # Track best by avg_last_k
         if avg_last_k > best_avg_last_k:
             best_avg_last_k = avg_last_k
-            torch.save(
-                {
-                    "epoch": epoch + 1,
-                    "model": model.state_dict(),
-                    "trial_params": dict(trial.params),
-                    "metrics": {
-                        "val_soft_dice": val_soft,
-                        "val_hard_dice@0.5": val_hard05,
-                        "avg_last_k_soft": avg_last_k,
-                        "avg_last_k_k": AVG_LAST_K,
-                    },
-                    "hpo": {
-                        "selection_metric": "avg_last_k_soft_dice",
-                        "epochs": EPOCHS,
-                        "loss_name": loss_name,
-                        "phase2_ckpt": PHASE2_CKPT,
-                    },
-                },
-                best_path,
-            )
+            best_epoch = epoch + 1
+            best_val_soft = val_soft
+            best_val_hard05 = val_hard05
 
         # ---- Optuna report / prune ----
-        # Start pruning only after a warmup window to reduce noise sensitivity.
-        # We report avg_last_k once we have a few points; otherwise report val_soft.
         report_metric = avg_last_k if len(last_k) >= 3 else val_soft
         trial.report(report_metric, step=epoch + 1)
 
         if trial.should_prune():
             raise optuna.TrialPruned()
 
-    return best_avg_last_k
+    # -----------------------
+    # Store metadata for reproducibility (no checkpoint saving)
+    # -----------------------
+    trial.set_user_attr("phase2_ckpt", PHASE2_CKPT)
+    trial.set_user_attr("avg_last_k", AVG_LAST_K)
+    trial.set_user_attr("selection_metric", "avg_last_k_soft")
+    trial.set_user_attr("best_epoch", best_epoch)
+    trial.set_user_attr("best_val_soft", float(best_val_soft))
+    trial.set_user_attr("best_val_hard05", float(best_val_hard05))
+    trial.set_user_attr("loss_name", loss_name)
+
+    return float(best_avg_last_k)
+
 
 
 def main():
