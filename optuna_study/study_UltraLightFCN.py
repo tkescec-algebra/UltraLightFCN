@@ -4,14 +4,18 @@ Complete HPO script (finetune-only) aligned with methodology:
     - Nondeterministic HPO (fast), deterministic VAL via transforms (valid mode)
     - Selection metric: soft Dice (thr=None)
     - Best checkpoint chosen by max avg_last_k (K=10)
-    - Save only "last" and "best"
+    - No checkpoint saving (store Optuna user_attrs for reproducibility)
     - MedianPruner
     - Logs soft + hard@0.5 Dice (hard only for monitoring, not selection)
+    - Option: fixed TRAIN+VAL subsets via file lists (auto-generated if missing),
+      later top-10 retrain on full dataset
 """
 
 import os
+import random
 from collections import deque
 
+import cv2
 import torch
 import optuna
 from tqdm import tqdm
@@ -23,9 +27,7 @@ from utils.helpers import get_loss_function, clear_cuda_cache
 from utils.load_simclr_pretrain_encoder import load_phase2_encoder_into_ultralight
 from utils.metrics import calculate_dice
 from utils.repro import set_global_seed
-
-from utils.dataset import SolarPanelDataset  # updated dataset (SimCLR-style listing, sorted, return_extra)
-
+from utils.dataset import SolarPanelDataset
 
 
 # -----------------------
@@ -37,29 +39,37 @@ DATA_ROOT = "/workspace/UltraLightFCN/dataset"
 TRAIN_SPLIT = "train"
 VAL_SPLIT = "valid"
 
-# Choose ONE Phase2 "best" checkpoint as fixed init for HPO
 PHASE2_CKPT = "/workspace/UltraLightFCN/pretrain/checkpoints/simclr_phase2/phase2_seed13_best.pth"
 
 CHANNELS = 3
 EPOCHS = 30
-
-# Selection stability
 AVG_LAST_K = 10
-
-# Hard Dice threshold only for monitoring (not for selection)
 HARD_THR_MONITOR = 0.5
 
-# DataLoader speed knobs (HPO is nondeterministic by design)
-NUM_WORKERS = 4
+NUM_WORKERS = 8
 PERSISTENT_WORKERS = True
 PREFETCH_FACTOR = 2
 
-# HPO seeding (sampling consistency); training itself remains nondeterministic
+# Option B: use fixed reduced subsets for TRAIN and VAL during HPO
+USE_HPO_SUBSET = True
+HPO_SUBSET_DIR = "hpo_subsets"
+HPO_TRAIN_LIST = os.path.join(HPO_SUBSET_DIR, "hpo_train_files.txt")
+HPO_VAL_LIST   = os.path.join(HPO_SUBSET_DIR, "hpo_val_files.txt")
+
+# Subset fractions (only used if lists do not exist yet)
+HPO_TRAIN_FRAC = 0.20
+HPO_VAL_FRAC   = 0.50
+
+# Dataset mask naming (must match SolarPanelDataset defaults)
+MASK_SUFFIX = "_label"
+MASK_EXT = ".png"
+IMG_EXTS = (".png", ".jpg", ".jpeg")
+
 set_global_seed(42, deterministic=False)
 
 
 # -----------------------
-# Encoder/decoder param split (same logic as ablation)
+# Encoder/decoder param split
 # -----------------------
 ENC_PREFIXES = ("block1", "dsconv2", "dsconv3", "dilconv4", "dilconv5")
 
@@ -74,60 +84,159 @@ def split_encoder_decoder_params(model):
     return enc_params, dec_params
 
 
+# -----------------------
+# Subset list utilities (SimCLR-style)
+# -----------------------
+def read_list(path: str):
+    if not os.path.isfile(path):
+        raise RuntimeError(f"Subset list not found: {path}")
+    with open(path, "r") as f:
+        files = [line.strip() for line in f if line.strip()]
+    if len(files) == 0:
+        raise RuntimeError(f"Empty subset list: {path}")
+    return files
+
+
+def _list_images(data_dir: str):
+    mask_tail = f"{MASK_SUFFIX}{MASK_EXT}".lower()
+    imgs = []
+    for f in os.listdir(data_dir):
+        fl = f.lower()
+        if fl.endswith(IMG_EXTS) and (not fl.endswith(mask_tail)):
+            imgs.append(f)
+    imgs.sort()
+    if len(imgs) == 0:
+        raise RuntimeError(f"No images found in: {data_dir}")
+    return imgs
+
+
+def _mask_path_for(img_name: str, data_dir: str) -> str:
+    stem, _ = os.path.splitext(img_name)
+    return os.path.join(data_dir, f"{stem}{MASK_SUFFIX}{MASK_EXT}")
+
+
+def _is_positive_mask(mask_path: str) -> bool:
+    m = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+    if m is None:
+        raise RuntimeError(f"Failed to read mask: {mask_path}")
+    return bool((m > 0).any())
+
+
+def _stratified_subsample(data_dir: str, frac: float, seed: int):
+    assert 0.0 < frac <= 1.0
+    rng = random.Random(seed)
+
+    imgs = _list_images(data_dir)
+    pos, neg = [], []
+
+    for name in imgs:
+        mp = _mask_path_for(name, data_dir)
+        if not os.path.isfile(mp):
+            raise RuntimeError(f"Missing mask for {name}: expected {mp}")
+        (pos if _is_positive_mask(mp) else neg).append(name)
+
+    n_total = int(round(frac * len(imgs)))
+    pos_ratio = len(pos) / max(1, len(imgs))
+    n_pos = int(round(n_total * pos_ratio))
+    n_neg = n_total - n_pos
+
+    rng.shuffle(pos)
+    rng.shuffle(neg)
+
+    chosen = pos[:min(n_pos, len(pos))] + neg[:min(n_neg, len(neg))]
+    rng.shuffle(chosen)
+
+    stats = {
+        "total": len(imgs),
+        "pos": len(pos),
+        "neg": len(neg),
+        "frac": frac,
+        "chosen_total": len(chosen),
+        "chosen_pos": sum(1 for x in chosen if x in set(pos)),
+        "chosen_neg": sum(1 for x in chosen if x in set(neg)),
+    }
+    return chosen, stats
+
+
+def _write_list(path: str, files):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        for name in files:
+            f.write(name + "\n")
+
+
+def ensure_hpo_lists():
+    """
+    SimCLR-style: ensure fixed subset lists exist.
+    If missing, generate them once (stratified by mask positivity) and reuse.
+    """
+    if not USE_HPO_SUBSET:
+        return
+
+    os.makedirs(HPO_SUBSET_DIR, exist_ok=True)
+
+    have_train = os.path.isfile(HPO_TRAIN_LIST)
+    have_val = os.path.isfile(HPO_VAL_LIST)
+
+    if have_train and have_val:
+        return
+
+    train_dir = os.path.join(DATA_ROOT, TRAIN_SPLIT)
+    val_dir   = os.path.join(DATA_ROOT, VAL_SPLIT)
+
+    train_files, train_stats = _stratified_subsample(train_dir, HPO_TRAIN_FRAC, seed=42)
+    val_files,   val_stats   = _stratified_subsample(val_dir,   HPO_VAL_FRAC,   seed=43)
+
+    _write_list(HPO_TRAIN_LIST, train_files)
+    _write_list(HPO_VAL_LIST,   val_files)
+
+    print("✅ Generated HPO subset lists:")
+    print("  ", HPO_TRAIN_LIST, train_stats)
+    print("  ", HPO_VAL_LIST,   val_stats)
+
+
+# -----------------------
+# Search spaces
+# -----------------------
 def build_model_params(trial):
-    """
-    Architecture knobs to tune (aligned with your ablation variants).
-    Keep encoder/decoder topology fixed; tune only context/attention switches.
-    """
     mini_aspp = trial.suggest_categorical("mini_aspp", [True, False])
     mini_aspp_gpool = trial.suggest_categorical("mini_aspp_gpool", [True, False]) if mini_aspp else False
 
     use_sa = trial.suggest_categorical("use_sa", [True, False])
     sa_window_size = trial.suggest_categorical("sa_window_size", [8, 16, 32]) if use_sa else 16
-
-    # Tune attention dropout (small discrete space)
     sa_dropout = trial.suggest_categorical("sa_dropout", [0.0, 0.05, 0.10]) if use_sa else 0.0
 
     return {
-        # Encoder configuration (fixed)
         "enc_channels": [16, 16, 32, 32, 64],
         "enc_kernel_sizes": [3, 3, 3, 3, 3],
         "enc_strides": [1, 2, 2, 1, 1],
         "dilations": [2, 4],
 
-        # Decoder configuration (fixed)
         "dec_channels": [32, 16, 16],
         "dec_kernel_sizes": [3, 3],
         "dec_strides": [1, 1],
         "upscale": [2, 2],
 
-        # Context (tuned)
         "mini_aspp": mini_aspp,
         "mini_aspp_gpool": mini_aspp_gpool,
 
-        # Attention (tuned except heads hardcoded)
         "use_sa": use_sa,
         "sa_windowed": True,
         "sa_window_size": sa_window_size,
         "sa_shifted": True,
-        "sa_heads": 4,           # hardcoded as agreed
+        "sa_heads": 4,
         "sa_dropout": sa_dropout,
     }
 
 
 def build_loss(trial):
-    """
-    Controlled loss search space (kept small to reduce val overfitting).
-    """
     loss_name = trial.suggest_categorical("loss", ["BCEDiceLoss", "BCEDiceFocalLoss"])
 
     if loss_name == "BCEDiceLoss":
-        # Stable, small discrete weight space
         bce_w = trial.suggest_categorical("bce_w", [0.3, 0.4, 0.5])
         dice_w = 1.0 - bce_w
         return loss_name, get_loss_function("BCEDiceLoss", bce_weight=bce_w, dice_weight=dice_w)
 
-    # BCEDiceFocalLoss
     bce_w = trial.suggest_categorical("bce_w", [0.3, 0.4, 0.5])
     dice_w = trial.suggest_categorical("dice_w", [0.1, 0.2, 0.3])
     focal_w = 1.0 - (bce_w + dice_w)
@@ -147,13 +256,19 @@ def build_loss(trial):
     )
 
 
-def build_loaders(bs):
-    """
-    Fast (nondeterministic) HPO loaders.
-    Validation determinism is ensured by transforms (mode='valid' has no random aug).
-    """
-    train_ds = SolarPanelDataset(os.path.join(DATA_ROOT, TRAIN_SPLIT), mode="train", return_extra=False)
-    val_ds = SolarPanelDataset(os.path.join(DATA_ROOT, VAL_SPLIT), mode="valid", return_extra=False)
+def build_loaders(bs: int):
+    train_dir = os.path.join(DATA_ROOT, TRAIN_SPLIT)
+    val_dir   = os.path.join(DATA_ROOT, VAL_SPLIT)
+
+    if USE_HPO_SUBSET:
+        train_files = read_list(HPO_TRAIN_LIST)
+        val_files   = read_list(HPO_VAL_LIST)
+    else:
+        train_files = None
+        val_files = None
+
+    train_ds = SolarPanelDataset(train_dir, mode="train", files=train_files, return_extra=False)
+    val_ds   = SolarPanelDataset(val_dir,   mode="valid", files=val_files,   return_extra=False)
 
     pw = PERSISTENT_WORKERS and (NUM_WORKERS > 0)
 
@@ -180,12 +295,12 @@ def build_loaders(bs):
     return train_loader, val_loader
 
 
+# -----------------------
+# Optuna objective
+# -----------------------
 def objective(trial: optuna.Trial) -> float:
-    # -----------------------
-    # Training HP search space
-    # -----------------------
-    bs = trial.suggest_categorical("batch_size", [8, 16])
-    base_lr = trial.suggest_float("base_lr", 1e-4, 5e-3, log=True)
+    bs = trial.suggest_categorical("batch_size", [8, 16, 32])
+    base_lr = trial.suggest_float("base_lr", 1e-4, 1e-2, log=True)
     enc_lr_mult = trial.suggest_float("enc_lr_mult", 0.01, 0.30, log=True)
     weight_decay = trial.suggest_float("weight_decay", 1e-6, 1e-3, log=True)
 
@@ -194,22 +309,13 @@ def objective(trial: optuna.Trial) -> float:
 
     train_loader, val_loader = build_loaders(bs)
 
-    # -----------------------
-    # Model init + Phase2 encoder load
-    # -----------------------
     model = UltraLightFCN(in_channels=CHANNELS, num_classes=1, params=model_params)
-
-    # Fixed init from Phase2
     load_phase2_encoder_into_ultralight(model, PHASE2_CKPT, verbose=(trial.number == 0))
-
-    # Move to device
     model = model.to(DEVICE)
 
-    # AMP only on CUDA
     use_amp = (DEVICE.type == "cuda")
     scaler = GradScaler("cuda", enabled=use_amp)
 
-    # Finetune-only optimizer: encoder smaller LR, decoder base LR
     enc_params, dec_params = split_encoder_decoder_params(model)
     optimizer = torch.optim.AdamW(
         [
@@ -229,29 +335,17 @@ def objective(trial: optuna.Trial) -> float:
         min_lr=1e-6,
     )
 
-    # -----------------------
-    # Selection by soft avg_last_k
-    # -----------------------
     last_k = deque(maxlen=AVG_LAST_K)
-
     best_avg_last_k = -1.0
     best_epoch = -1
     best_val_soft = -1.0
     best_val_hard05 = -1.0
 
-    # -----------------------
-    # Train loop
-    # -----------------------
     for epoch in range(EPOCHS):
-        # ---- Train ----
         model.train()
-        for images, masks in tqdm(
-            train_loader,
-            desc=f"[trial {trial.number}] Train {epoch+1}/{EPOCHS}",
-            leave=False,
-        ):
+        for images, masks in tqdm(train_loader, desc=f"[trial {trial.number}] Train {epoch+1}/{EPOCHS}", leave=False):
             images = images.to(DEVICE, non_blocking=True)
-            masks = masks.to(DEVICE, non_blocking=True)
+            masks  = masks.to(DEVICE, non_blocking=True)
 
             optimizer.zero_grad(set_to_none=True)
             with autocast(device_type="cuda", enabled=use_amp):
@@ -262,14 +356,13 @@ def objective(trial: optuna.Trial) -> float:
             scaler.step(optimizer)
             scaler.update()
 
-        # ---- Validation (soft Dice for selection; hard Dice@0.5 for monitoring) ----
         model.eval()
         soft_sum = 0.0
         hard05_sum = 0.0
         with torch.no_grad():
             for images, masks in val_loader:
                 images = images.to(DEVICE, non_blocking=True)
-                masks = masks.to(DEVICE, non_blocking=True)
+                masks  = masks.to(DEVICE, non_blocking=True)
 
                 with autocast(device_type="cuda", enabled=use_amp):
                     logits = model(images)
@@ -285,41 +378,44 @@ def objective(trial: optuna.Trial) -> float:
         last_k.append(val_soft)
         avg_last_k = float(sum(last_k) / len(last_k))
 
-        # Track best by avg_last_k
         if avg_last_k > best_avg_last_k:
             best_avg_last_k = avg_last_k
             best_epoch = epoch + 1
             best_val_soft = val_soft
             best_val_hard05 = val_hard05
 
-        # ---- Optuna report / prune ----
         report_metric = avg_last_k if len(last_k) >= 3 else val_soft
         trial.report(report_metric, step=epoch + 1)
-
         if trial.should_prune():
             raise optuna.TrialPruned()
 
-    # -----------------------
-    # Store metadata for reproducibility (no checkpoint saving)
-    # -----------------------
     trial.set_user_attr("phase2_ckpt", PHASE2_CKPT)
     trial.set_user_attr("avg_last_k", AVG_LAST_K)
     trial.set_user_attr("selection_metric", "avg_last_k_soft")
-    trial.set_user_attr("best_epoch", best_epoch)
+    trial.set_user_attr("best_epoch", int(best_epoch))
     trial.set_user_attr("best_val_soft", float(best_val_soft))
     trial.set_user_attr("best_val_hard05", float(best_val_hard05))
-    trial.set_user_attr("loss_name", loss_name)
+    trial.set_user_attr("loss_name", str(loss_name))
+    trial.set_user_attr("use_hpo_subset", bool(USE_HPO_SUBSET))
+    if USE_HPO_SUBSET:
+        trial.set_user_attr("hpo_train_list", HPO_TRAIN_LIST)
+        trial.set_user_attr("hpo_val_list", HPO_VAL_LIST)
+        trial.set_user_attr("hpo_train_frac", float(HPO_TRAIN_FRAC))
+        trial.set_user_attr("hpo_val_frac", float(HPO_VAL_FRAC))
 
     return float(best_avg_last_k)
 
 
-
+# -----------------------
+# Main
+# -----------------------
 def main():
-    os.makedirs("optuna_outputs", exist_ok=True)
+    # Ensure fixed subset lists exist (SimCLR-style)
+    ensure_hpo_lists()
 
     study = optuna.create_study(
         direction="maximize",
-        study_name=f"UltraLightFCN_seg_finetune_softdice_RGB",
+        study_name="UltraLightFCN_seg_finetune_softdice_RGB",
         storage="sqlite:///UltraLightFCN_study.db",
         load_if_exists=True,
         pruner=optuna.pruners.MedianPruner(
