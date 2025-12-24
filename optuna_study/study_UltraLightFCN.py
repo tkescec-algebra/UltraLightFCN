@@ -33,7 +33,7 @@ from utils.dataset import SolarPanelDataset  # updated dataset (SimCLR-style lis
 # -----------------------
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-DATA_ROOT = "/workspace/UltraLightFCN_snakemake/dataset"
+DATA_ROOT = "/workspace/UltraLightFCN/dataset"
 TRAIN_SPLIT = "train"
 VAL_SPLIT = "valid"
 
