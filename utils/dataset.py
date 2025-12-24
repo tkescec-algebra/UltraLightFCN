@@ -1,5 +1,4 @@
 import os
-
 import cv2
 import numpy as np
 import torch
@@ -7,68 +6,117 @@ from torch.utils.data import Dataset
 
 from utils.transforms import get_transforms, get_simclr_transforms
 
-# Basic dataset for solar panel images
+
 class SolarPanelDataset(Dataset):
     """
-    Dataset for solar panel images (RGB only, 3 channels).
+    Segmentation dataset for solar panel images + binary masks.
 
-    Arguments:
-        data_dir (str): directory with JPG images and corresponding labels (_label.png).
-        mode (str): "train", "val", or "test" for different transformations.
+    - Supports .png/.jpg/.jpeg
+    - Excludes mask files (*_label.png) from the image list (prevents leakage)
+    - Deterministic ordering via sorted(...)
+    - Optional preselected list of filenames (files=...), like SimCLR dataset
+    - Optional return_extra: returns (img, mask, original, name) when True,
+      otherwise returns (img, mask) for faster training/Optuna.
     """
+
+    IMG_EXTS = (".png", ".jpg", ".jpeg")
+
     def __init__(
         self,
         data_dir: str,
-        mode: str = "train"  # "train" | "valid" | "test"
+        mode: str = "train",              # "train" | "valid" | "test"
+        files=None,                       # optional iterable of filenames (relative to data_dir)
+        mask_suffix: str = "_label",      # mask naming: <stem> + mask_suffix + mask_ext
+        mask_ext: str = ".png",
+        return_extra: bool = False,
     ):
-        assert mode in ("train", "valid", "test")
+        assert mode in ("train", "valid", "test"), f"Invalid mode: {mode}"
         self.data_dir = data_dir
         self.mode = mode
+        self.mask_suffix = mask_suffix
+        self.mask_ext = mask_ext
+        self.return_extra = return_extra
 
-        # We don't use edge transforms anymore
-        self.geo_tf, self.photo_tf, self.to_tensor = get_transforms(
-            mode=self.mode,
-            edge_transforms=False
-        )
+        # Albumentations-style transforms:
+        # geo_tf: joint (image+mask), photo_tf: image-only, to_tensor: tensor conversion/normalization
+        self.geo_tf, self.photo_tf, self.to_tensor = get_transforms(mode=self.mode)
 
-        self.images = [f for f in os.listdir(data_dir) if f.endswith(".jpg")]
+        # Build image list (exclude masks)
+        mask_tail = f"{self.mask_suffix}{self.mask_ext}".lower()
+
+        if files is not None:
+            imgs = [
+                f for f in list(files)
+                if f.lower().endswith(self.IMG_EXTS) and (not f.lower().endswith(mask_tail))
+            ]
+        else:
+            imgs = [
+                f for f in os.listdir(data_dir)
+                if f.lower().endswith(self.IMG_EXTS) and (not f.lower().endswith(mask_tail))
+            ]
+
+        imgs = sorted(imgs)
+        if len(imgs) == 0:
+            raise RuntimeError(f"No images found in {data_dir}")
+
+        # Safety: ensure we didn't accidentally include masks
+        if any(f.lower().endswith(mask_tail) for f in imgs):
+            raise RuntimeError("Mask leakage: mask files ended up in the image list.")
+
+        self.images = imgs
 
     def __len__(self):
         return len(self.images)
 
-    def __getitem__(self, idx):
+    def _resolve_mask_path(self, img_name: str) -> str:
+        """
+        Default mask naming: <stem>_label.png
+        Example: foo.jpg -> foo_label.png
+        """
+        stem, _ = os.path.splitext(img_name)
+        mask_name = f"{stem}{self.mask_suffix}{self.mask_ext}"
+        mask_path = os.path.join(self.data_dir, mask_name)
+        if not os.path.isfile(mask_path):
+            raise RuntimeError(
+                f"Mask not found for image '{img_name}'. Expected '{mask_name}' in: {self.data_dir}"
+            )
+        return mask_path
+
+    def __getitem__(self, idx: int):
         name = self.images[idx]
+        img_path = os.path.join(self.data_dir, name)
 
-        # --- load image and mask ---
-        img = cv2.cvtColor(
-            cv2.imread(os.path.join(self.data_dir, name)),
-            cv2.COLOR_BGR2RGB
-        )
+        img_bgr = cv2.imread(img_path, cv2.IMREAD_COLOR)
+        if img_bgr is None:
+            raise RuntimeError(f"Failed to read image: {img_path}")
 
-        mask = cv2.imread(
-            os.path.join(self.data_dir, name.replace(".jpg", "_label.png")),
-            cv2.IMREAD_GRAYSCALE
-        ).astype(np.float32)
+        img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
 
-        # Normalize mask to {0,1}
-        mask = (mask > 0).astype(np.float32)
+        mask_path = self._resolve_mask_path(name)
+        mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+        if mask is None:
+            raise RuntimeError(f"Failed to read mask: {mask_path}")
 
-        # --- apply geometric transforms ---
+        mask = (mask.astype(np.float32) > 0).astype(np.float32)
+
+        # Joint geometric transforms (must keep image/mask aligned)
         aug = self.geo_tf(image=img, mask=mask)
-        img_aug, mask = aug["image"], aug["mask"]
+        img_aug, mask_aug = aug["image"], aug["mask"]
 
-        # --- save "original" for visualization (before normalization) ---
-        original = img_aug.copy()
+        # Optional original (after geo, before photometric/normalization)
+        original = img_aug.copy() if self.return_extra else None
 
-        # --- photometric + normalize on RGB ---
-        img_photometric = self.photo_tf(image=img_aug)["image"]
+        # Photometric + normalization on image only
+        img_photo = self.photo_tf(image=img_aug)["image"]
+        img_tensor = self.to_tensor(image=img_photo)["image"].float()
 
-        # --- convert to tensors ---
-        img_tensor = self.to_tensor(image=img_photometric)["image"]  # (3, H, W)
-        mask_tensor = torch.from_numpy(mask).unsqueeze(0)            # (1, H, W)
+        # Mask to tensor (1, H, W)
+        mask_tensor = torch.from_numpy(mask_aug).unsqueeze(0).float()
 
-        # --- return input, mask, original and name ---
-        return img_tensor.float(), mask_tensor.float(), original, name
+        if self.return_extra:
+            return img_tensor, mask_tensor, original, name
+        return img_tensor, mask_tensor
+
 
 # Dataset for SimCLR contrastive learning on solar panel images.
 class SimCLRSolarPanelDataset(Dataset):
