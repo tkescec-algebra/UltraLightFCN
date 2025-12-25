@@ -50,7 +50,7 @@ NUM_WORKERS = 8
 PERSISTENT_WORKERS = True
 PREFETCH_FACTOR = 2
 
-# Option B: use fixed reduced subsets for TRAIN and VAL during HPO
+# Option: use fixed reduced subsets for TRAIN and VAL during HPO
 USE_HPO_SUBSET = True
 HPO_SUBSET_DIR = "hpo_subsets"
 HPO_TRAIN_LIST = os.path.join(HPO_SUBSET_DIR, "hpo_train_files.txt")
