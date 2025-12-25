@@ -334,7 +334,7 @@ def retrain_one_candidate(
             f"Epoch {epoch+1:02d}/{EPOCHS} | val_soft={val_soft:.4f} | avg_last_k={avg_last_k:.4f}"
         )
 
-    clear_cuda_cache()
+    clear_cuda_cache(None, None)
 
     # CSV row (no last checkpoint)
     row: Dict[str, Any] = {
