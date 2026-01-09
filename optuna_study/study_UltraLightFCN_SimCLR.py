@@ -28,6 +28,7 @@ import random
 from pathlib import Path
 from typing import List, Tuple, Dict
 
+import numpy as np
 import torch
 import optuna
 from torch.utils.data import DataLoader
@@ -155,7 +156,7 @@ PRETRAIN_TRAIN_FILES, PRETRAIN_VAL_FILES = get_or_create_pretrain_splits()
 
 
 # -------------------------------------------------------------------------
-# 3) Helper: step-based scheduling
+# 3) Helper: steps per epoch calculation and worker seeding
 # -------------------------------------------------------------------------
 def steps_per_epoch(n: int, bs: int, drop_last: bool) -> int:
     """Number of optimizer updates per epoch."""
@@ -164,6 +165,15 @@ def steps_per_epoch(n: int, bs: int, drop_last: bool) -> int:
     if drop_last:
         return max(1, n // bs)
     return max(1, math.ceil(n / bs))
+
+def seed_worker(worker_id: int):
+    """
+    Ensure each DataLoader worker has a deterministic RNG state.
+    This makes augmentations + any numpy/random usage reproducible.
+    """
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
 
 # -------------------------------------------------------------------------
@@ -180,19 +190,16 @@ def objective(trial: optuna.Trial) -> float:
       - proj_out_dim: projection output dimension (embedding dim)
       - max_grad_norm: gradient clipping threshold
     """
+    # Reproducibility per trial
+    set_global_seed(GLOBAL_SEED, deterministic=False)
+
     # 4.1 Hyperparameters to tune
     simclr_lr = trial.suggest_float("simclr_lr", 3e-5, 3e-3, log=True)
     simclr_temperature = trial.suggest_float("simclr_temperature", 0.05, 1.0, log=True)
     wd = trial.suggest_float("weight_decay", 1e-6, 1e-3, log=True)
-
-    # NEW: warmup ratio (fraction of total_steps)
     warmup_ratio = trial.suggest_float("warmup_ratio", 0.05, 0.30)
-
-    # NEW: projection head dimensions (small discrete set)
     proj_hidden_dim = trial.suggest_categorical("proj_hidden_dim", [128, 256])
     proj_out_dim = trial.suggest_categorical("proj_out_dim", [64, 128])
-
-    # NEW: gradient clipping threshold
     max_grad_norm = trial.suggest_categorical("max_grad_norm", [0.5, 1.0, 2.0])
 
     # 4.2 Dataset / loaders (fixed file lists)
@@ -204,6 +211,13 @@ def objective(trial: optuna.Trial) -> float:
     if DROP_LAST and n_train < SIMCLR_BS:
         drop_last_trial = False
 
+    # Deterministic sampling + deterministic worker RNG for THIS trial
+    g_train = torch.Generator()
+    g_train.manual_seed(GLOBAL_SEED)
+
+    g_val = torch.Generator()
+    g_val.manual_seed(GLOBAL_SEED + 10)
+
     train_loader = DataLoader(
         simclr_train_ds,
         batch_size=SIMCLR_BS,
@@ -213,7 +227,10 @@ def objective(trial: optuna.Trial) -> float:
         num_workers=8,
         persistent_workers=True,
         prefetch_factor=4,
+        worker_init_fn=seed_worker,
+        generator=g_train,
     )
+
     val_loader = DataLoader(
         simclr_val_ds,
         batch_size=SIMCLR_BS,
@@ -223,6 +240,8 @@ def objective(trial: optuna.Trial) -> float:
         num_workers=8,
         persistent_workers=True,
         prefetch_factor=4,
+        worker_init_fn=seed_worker,
+        generator=g_val,
     )
 
     # 4.3 Step-based schedule setup
@@ -287,6 +306,11 @@ def objective(trial: optuna.Trial) -> float:
     trial.set_user_attr("proj_hidden_dim", int(proj_hidden_dim))
     trial.set_user_attr("proj_out_dim", int(proj_out_dim))
     trial.set_user_attr("max_grad_norm", float(max_grad_norm))
+
+    # Global seed for reproducibility
+    trial.set_user_attr("global_seed", int(GLOBAL_SEED))
+    trial.set_user_attr("n_train_files", len(PRETRAIN_TRAIN_FILES))
+    trial.set_user_attr("n_val_files", len(PRETRAIN_VAL_FILES))
 
     # 4.5 Train + val proxy per epoch
     epoch_val_ratios: List[float] = []
