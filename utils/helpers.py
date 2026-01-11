@@ -4,6 +4,8 @@ import re
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+import cv2
+import numpy as np
 import optuna
 import torch
 import random
@@ -232,3 +234,52 @@ def make_reduced_file_list(
         raise RuntimeError("Mask leakage: *_label.png present in reduced file list.")
 
     return selected
+
+def estimate_pos_weight_from_masks(
+    train_dir: str,
+    max_images: int = 500,
+    seed: int = 13,
+) -> float | None:
+    """
+    Estimate pos_weight for BCEWithLogitsLoss as neg_pixels / pos_pixels.
+    Uses a fixed random subset of masks for speed. Returns None if no positives found.
+    """
+    rng = np.random.default_rng(seed)
+
+    all_files = [f for f in os.listdir(train_dir) if f.lower().endswith((".png", ".jpg", ".jpeg", ".tif", ".tiff"))]
+    # Keep only image files (exclude label files); assumes label name contains "_label"
+    image_files = [f for f in all_files if "_label" not in f]
+
+    if len(image_files) == 0:
+        return None
+
+    # Deterministic subset
+    if len(image_files) > max_images:
+        idx = rng.choice(len(image_files), size=max_images, replace=False)
+        image_files = [image_files[i] for i in idx]
+    else:
+        image_files = sorted(image_files)
+
+    pos = 0
+    neg = 0
+
+    for img_name in image_files:
+        base, ext = os.path.splitext(img_name)
+        mask_path = os.path.join(train_dir, f"{base}_label.png")  # adjust if your mask ext differs
+
+        if not os.path.exists(mask_path):
+            continue
+
+        m = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+        if m is None:
+            continue
+
+        # Assume masks are 0/255 or 0/1; binarize
+        m_bin = (m > 0).astype(np.uint8)
+        pos += int(m_bin.sum())
+        neg += int(m_bin.size - m_bin.sum())
+
+    if pos == 0:
+        return None
+
+    return float(neg / pos)
