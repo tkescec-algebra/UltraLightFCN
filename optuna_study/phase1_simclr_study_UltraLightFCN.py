@@ -36,6 +36,7 @@ from torch.amp import autocast, GradScaler
 from tqdm import tqdm
 from timm.scheduler import CosineLRScheduler
 
+from utils.config import ENCODER_PARAMS
 from utils.dataset import SimCLRSolarPanelDataset
 from utils.repro import set_global_seed, GLOBAL_SEED
 from utils.helpers import clear_cuda_cache, infer_subset_from_filename, make_reduced_file_list
@@ -250,28 +251,10 @@ def objective(trial: optuna.Trial) -> float:
     if total_steps <= 0:
         raise optuna.TrialPruned()
 
-    # NEW: warmup_steps derived from tuned warmup_ratio
-    warmup_steps = max(1, int(warmup_ratio * total_steps))
-    # Safety: do not let warmup exceed total_steps-1 (Cosine scheduler expects warmup < total cycle)
-    warmup_steps = min(warmup_steps, max(1, total_steps - 1))
+    warmup_steps = int(warmup_ratio * total_steps)
+    warmup_steps = min(max(1, warmup_steps), max(1, total_steps - 1))
 
-    # 4.4 Model setup
-    model_params = {
-        'enc_channels': [16, 16, 32, 32, 64],
-        'enc_kernel_sizes': [3, 3, 3, 3, 3],
-        'enc_strides': [1, 2, 2, 1, 1],
-        'dilations': [2, 4],
-        'mini_aspp': True,
-        'mini_aspp_gpool': True,
-        'use_sa': False,
-        'sa_windowed': True,
-        'sa_window_size': 16,
-        'sa_shifted': True,
-        'sa_heads': 4,
-        'sa_dropout': 0.1,
-    }
-
-    encoder = UltraLightEncoder(in_channels=3, params=model_params).to(DEVICE)
+    encoder = UltraLightEncoder(in_channels=3, params=ENCODER_PARAMS).to(DEVICE)
 
     # IMPORTANT: ProjectionHead signature is (in_dim, hidden_dim, out_dim)
     proj_head = ProjectionHead(encoder.out_channels, hidden_dim=proj_hidden_dim, out_dim=proj_out_dim).to(DEVICE)

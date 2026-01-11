@@ -1,12 +1,7 @@
-from __future__ import annotations
-
-from pretrain.utils.metrics_simclr import simclr_alignment, simclr_uniformity
-from utils.helpers import estimate_pos_weight_from_masks
-
 """
 retrain_top10_downstream_phase2.py
 
-Phase 2 (methodology-aligned):
+Phase 2:
 - Load top-K SimCLR hyperparameter sets from the Phase 1 Optuna study.
 - Retrain each candidate SimCLR model on the FULL downstream TRAIN split (80%) with no internal validation.
 - Select the best pretrained encoder using a controlled downstream-aware evaluation on the official VALID split (10%):
@@ -19,6 +14,8 @@ Notes:
 - RNG is reset per candidate + DataLoader generators/workers are seeded for fair comparison.
 """
 
+from __future__ import annotations
+
 import os
 import math
 import csv
@@ -26,22 +23,21 @@ import random
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
 
-import cv2
 import numpy as np
 import optuna
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import segmentation_models_pytorch as smp
 from torch.utils.data import DataLoader
 from torch.amp import autocast, GradScaler
 from tqdm import tqdm
 from timm.scheduler import CosineLRScheduler
 
+from utils.config import ENCODER_PARAMS
 from utils.repro import set_global_seed, GLOBAL_SEED
 from utils.loss_functions import NTXentLoss, BCEDiceLoss
 from utils.dataset import SimCLRSolarPanelDataset, SolarPanelDataset
 from utils.metrics import calculate_dice
+from pretrain.utils.metrics_simclr import simclr_alignment, simclr_uniformity
+from utils.helpers import estimate_pos_weight_from_masks
 from models.UltraLightFCN_SimCLR import UltraLightEncoder, ProjectionHead, SimCLRModel
 from models.UltraLightFCN_base import UltraLightFCN
 
@@ -140,7 +136,7 @@ def steps_per_epoch(n_samples: int, batch_size: int, drop_last: bool) -> int:
 # SimCLR build / train
 # -----------------------------
 def build_encoder_and_model(proj_hidden_dim: int, proj_out_dim: int) -> Tuple[UltraLightEncoder, SimCLRModel]:
-    encoder = UltraLightEncoder(in_channels=3).to(DEVICE)
+    encoder = UltraLightEncoder(in_channels=3, params=ENCODER_PARAMS).to(DEVICE)
     proj = ProjectionHead(in_dim=encoder.out_channels, hidden_dim=proj_hidden_dim, out_dim=proj_out_dim).to(DEVICE)
     model = SimCLRModel(encoder, proj).to(DEVICE)
     return encoder, model

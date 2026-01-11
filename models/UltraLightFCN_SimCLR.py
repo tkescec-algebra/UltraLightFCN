@@ -26,11 +26,11 @@ class UltraLightEncoder(nn.Module):
                 'dilations': [2, 4],
                 # Context
                 'mini_aspp': True,
-                'mini_aspp_gpool': False,
+                'mini_aspp_gpool': True,
                 # Attention
                 'use_sa': True,
                 'sa_windowed': True,
-                'sa_window_size': 8,
+                'sa_window_size': 16,
                 'sa_shifted': True,
                 'sa_heads': 4,
                 'sa_dropout': 0.1,
