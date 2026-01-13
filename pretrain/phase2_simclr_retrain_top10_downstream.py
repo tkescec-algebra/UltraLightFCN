@@ -48,7 +48,7 @@ from models.UltraLightFCN_base import UltraLightFCN
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Phase 1 Optuna study (SimCLR HPO)
-STORAGE = "sqlite:///UltraLightFCN_study.db"
+STORAGE = "sqlite:////workspace/UltraLightFCN/optuna_study/UltraLightFCN_study.db"
 STUDY_NAME = "UltraLightFCN_SimCLR_pretrain_RGB"
 TOPK = 10
 
@@ -60,7 +60,7 @@ VAL_DIR   = os.path.join(DATA_ROOT, "valid")   # downstream VALID (10%)
 # SimCLR retrain budget
 SIMCLR_IMAGE_SIZE = 256
 SIMCLR_EPOCHS = 40
-SIMCLR_BS_DEFAULT = 1024
+SIMCLR_BS_DEFAULT = 256
 DROP_LAST = True
 
 
