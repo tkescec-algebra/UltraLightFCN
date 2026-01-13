@@ -20,20 +20,22 @@ Methodology alignment with Phase 1/2:
 
 from __future__ import annotations
 
+import copy
 import csv
 import json
 import time
 import random
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional
 
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 
 from timm.scheduler import CosineLRScheduler
+from tqdm import tqdm
 
 from utils.config import ENCODER_PARAMS
 # Project imports (keep consistent with Phase 1/2)
@@ -59,12 +61,12 @@ class Phase3Config:
     image_size: int = 256
 
     # Output
-    out_dir: str = "/workspace/UltraLightFCN/checkpoints/simclr_phase3"
+    out_dir: str = "/workspace/UltraLightFCN/pretrain/checkpoints/simclr_phase3"
     run_tag: str = "phase3_full_pretrain"
 
     # Phase 2 results (used to pull the best SimCLR hyperparameters)
     # IMPORTANT: this CSV must come from Phase 2 (top-K retrain + downstream warm-up ranking).
-    phase2_results_csv: str = "/workspace/UltraLightFCN/checkpoints/simclr_phase2/phase2_topk_results.csv"
+    phase2_results_csv: str = "/workspace/UltraLightFCN/pretrain/checkpoints/simclr_topk_retrain_downstream/phase2_topk_results.csv"
 
     # Seeds
     # Using 1 seed is acceptable for SSL full pretrain if compute is limited.
@@ -91,7 +93,7 @@ class Phase3Config:
 
     # Encoder architecture (must match downstream usage!)
     # If you want to override defaults, set encoder_params explicitly here.
-    encoder_params: Optional[Dict[str, Any]] = ENCODER_PARAMS
+    encoder_params: Optional[Dict[str, Any]] = field(default_factory=lambda: copy.deepcopy(ENCODER_PARAMS))
 
 
 # -----------------------------------------------------------------------------
@@ -402,7 +404,7 @@ def run_one_seed(cfg: Phase3Config, hp: SimCLRHP, seed: int) -> None:
     criterion = NTXentLoss(temperature=hp.temperature, device=device)
 
     # AMP scaler per run (do not reuse across runs)
-    scaler = GradScaler(enabled=(cfg.amp and device.type == "cuda"))
+    scaler = GradScaler("cuda", enabled=(cfg.amp and device.type == "cuda"))
 
     # Logging CSV (train-only)
     csv_path = out_dir / f"phase3_train_metrics_seed{seed}.csv"
@@ -417,7 +419,7 @@ def run_one_seed(cfg: Phase3Config, hp: SimCLRHP, seed: int) -> None:
         epoch_loss = 0.0
         seen = 0
 
-        for batch in train_loader:
+        for batch in tqdm(train_loader, desc=f"[Phase3][seed={seed}] epoch {epoch}/{cfg.epochs}", leave=False):
             x1, x2, _ = batch
             x1 = x1.to(device, non_blocking=True)
             x2 = x2.to(device, non_blocking=True)
