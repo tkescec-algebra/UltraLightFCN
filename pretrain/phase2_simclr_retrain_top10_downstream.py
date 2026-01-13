@@ -31,7 +31,7 @@ from torch.amp import autocast, GradScaler
 from tqdm import tqdm
 from timm.scheduler import CosineLRScheduler
 
-from utils.config import ENCODER_PARAMS
+from utils.config import ENCODER_PARAMS, SEG_PARAMS
 from utils.repro import set_global_seed, GLOBAL_SEED
 from utils.loss_functions import NTXentLoss, BCEDiceLoss
 from utils.dataset import SimCLRSolarPanelDataset, SolarPanelDataset
@@ -499,7 +499,7 @@ def mini_seg_warmup_eval(encoder_ckpt_path: str, pos_weight: float | None) -> fl
         generator=g_val,
     )
 
-    model = UltraLightFCN(in_channels=3, num_classes=1, params=ENCODER_PARAMS).to(DEVICE)
+    model = UltraLightFCN(in_channels=3, num_classes=1, params=SEG_PARAMS).to(DEVICE)
     load_encoder_into_ultralight(model, encoder_ckpt_path)
     freeze_encoder_params(model)
     assert_encoder_frozen(model)

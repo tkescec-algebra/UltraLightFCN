@@ -15,3 +15,12 @@ ENCODER_PARAMS = {
     'sa_heads': 4,
     'sa_dropout': 0.1,
 }
+
+SEG_PARAMS = dict(ENCODER_PARAMS)
+SEG_PARAMS.update({
+    # Decoder
+    "dec_channels": [32, 16, 16],
+    "dec_kernel_sizes": [3, 3],
+    "dec_strides": [1, 1],
+    "upscale": [2, 2],
+})
