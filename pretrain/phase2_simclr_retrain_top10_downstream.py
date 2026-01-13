@@ -499,7 +499,7 @@ def mini_seg_warmup_eval(encoder_ckpt_path: str, pos_weight: float | None) -> fl
         generator=g_val,
     )
 
-    model = UltraLightFCN(in_channels=3, num_classes=1).to(DEVICE)
+    model = UltraLightFCN(in_channels=3, num_classes=1, params=ENCODER_PARAMS).to(DEVICE)
     load_encoder_into_ultralight(model, encoder_ckpt_path)
     freeze_encoder_params(model)
     assert_encoder_frozen(model)
