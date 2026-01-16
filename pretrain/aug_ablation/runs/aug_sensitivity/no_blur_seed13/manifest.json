@@ -45,5 +45,5 @@
   },
   "encoder_params_source": "phase3_last_ckpt.meta.config.encoder_params",
   "encoder_out_channels": 64,
-  "time_started": "2026-01-16 13:42:52"
+  "time_started": "2026-01-16 13:59:33"
 }
