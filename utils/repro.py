@@ -46,8 +46,12 @@ def set_global_seed(seed: int = GLOBAL_SEED, deterministic: bool = True, strict:
         except AttributeError:
             pass
 
+
 def seed_worker(worker_id: int) -> None:
-    """Reproducibilan seed za svakog DataLoader worker-a."""
-    worker_seed = torch.initial_seed() % 2**32
-    random.seed(worker_seed)
+    """
+    Ensure each DataLoader worker has a deterministic RNG state.
+    This controls any numpy/random usage inside datasets/transforms.
+    """
+    worker_seed = torch.initial_seed() % 2 ** 32
     np.random.seed(worker_seed)
+    random.seed(worker_seed)

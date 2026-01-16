@@ -283,3 +283,4 @@ def estimate_pos_weight_from_masks(
         return None
 
     return float(neg / pos)
+

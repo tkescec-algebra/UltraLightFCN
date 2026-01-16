@@ -32,7 +32,7 @@ from tqdm import tqdm
 from timm.scheduler import CosineLRScheduler
 
 from utils.config import ENCODER_PARAMS, SEG_PARAMS
-from utils.repro import set_global_seed, GLOBAL_SEED
+from utils.repro import set_global_seed, GLOBAL_SEED, seed_worker
 from utils.loss_functions import NTXentLoss, BCEDiceLoss
 from utils.dataset import SimCLRSolarPanelDataset, SolarPanelDataset
 from utils.metrics import calculate_dice
@@ -94,16 +94,6 @@ ENCODER_PREFIXES = (
 # -----------------------------
 # Repro helpers
 # -----------------------------
-def seed_worker(worker_id: int) -> None:
-    """
-    Make each DataLoader worker deterministic.
-    This controls numpy/random usage inside dataset/augmentations.
-    """
-    worker_seed = torch.initial_seed() % 2**32
-    np.random.seed(worker_seed)
-    random.seed(worker_seed)
-
-
 def list_images_no_masks(data_dir: str) -> List[str]:
     """
     List image files in a directory, excluding mask files (*_label.*).

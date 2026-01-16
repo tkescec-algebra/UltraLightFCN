@@ -38,7 +38,7 @@ from timm.scheduler import CosineLRScheduler
 
 from utils.config import ENCODER_PARAMS
 from utils.dataset import SimCLRSolarPanelDataset
-from utils.repro import set_global_seed, GLOBAL_SEED
+from utils.repro import set_global_seed, GLOBAL_SEED, seed_worker
 from utils.helpers import clear_cuda_cache, infer_subset_from_filename, make_reduced_file_list
 from utils.loss_functions import NTXentLoss
 from models.UltraLightFCN_SimCLR import UltraLightEncoder, ProjectionHead, SimCLRModel
@@ -166,16 +166,6 @@ def steps_per_epoch(n: int, bs: int, drop_last: bool) -> int:
     if drop_last:
         return max(1, n // bs)
     return max(1, math.ceil(n / bs))
-
-def seed_worker(worker_id: int):
-    """
-    Ensure each DataLoader worker has a deterministic RNG state.
-    This makes augmentations + any numpy/random usage reproducible.
-    """
-    worker_seed = torch.initial_seed() % 2**32
-    np.random.seed(worker_seed)
-    random.seed(worker_seed)
-
 
 # -------------------------------------------------------------------------
 # 4) Optuna objective (one trial)

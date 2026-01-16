@@ -37,13 +37,14 @@ from torch.amp import autocast, GradScaler
 from timm.scheduler import CosineLRScheduler
 from tqdm import tqdm
 
+
 from utils.config import ENCODER_PARAMS
 # Project imports (keep consistent with Phase 1/2)
 from utils.dataset import SimCLRSolarPanelDataset
 from utils.loss_functions import NTXentLoss
-from utils.repro import set_global_seed
+from utils.repro import set_global_seed, seed_worker
 from utils.metrics_simclr import simclr_alignment, simclr_uniformity
-from utils.transforms import get_simclr_transforms
+from pretrain.utils.transforms import get_simclr_transforms
 
 # SimCLR model components
 from models.UltraLightFCN_SimCLR import UltraLightEncoder, ProjectionHead, SimCLRModel
@@ -118,17 +119,6 @@ def list_images_no_masks_sorted(folder: str) -> List[str]:
             continue
         files.append(name)
     return sorted(files)
-
-
-def seed_worker(worker_id: int) -> None:
-    """
-    Ensure each DataLoader worker has a deterministic RNG state.
-    This controls any numpy/random usage inside datasets/transforms.
-    """
-    worker_seed = torch.initial_seed() % 2**32
-    np.random.seed(worker_seed)
-    random.seed(worker_seed)
-
 
 def steps_per_epoch(n_items: int, batch_size: int, drop_last: bool) -> int:
     if drop_last:

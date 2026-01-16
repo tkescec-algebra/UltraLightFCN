@@ -4,9 +4,10 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from utils.transforms import get_transforms, get_simclr_transforms
+from pretrain.utils.transforms import get_simclr_transforms
+from utils.transforms import get_transforms
 
-
+# Segmentation dataset for solar panel images + binary masks.
 class SolarPanelDataset(Dataset):
     """
     Segmentation dataset for solar panel images + binary masks.

@@ -1,30 +1,22 @@
 import albumentations as A
 import cv2
 from albumentations.pytorch import ToTensorV2
-from torchvision.transforms import ColorJitter
-from torchvision import transforms
-from PIL import Image
-import numpy as np
-from torchvision.transforms.functional import to_pil_image
 
-
+"""
+Albumentations transforms for RGB images + binary masks.
+Goals:
+- Fixed spatial size across splits (robust batching + stable eval)
+- Train: moderate geo + photo augs
+- Valid/Test: deterministic (no random aug), only resize/pad + normalization
+- Safe mask handling (NEAREST for masks, fill_mask=0)
+Returns:
+    geo_tf, photo_tf, to_tensor
+"""
 
 def get_transforms(
     mode: str = "train",          # "train" | "valid" | "test"
     image_size: int = 256,
 ):
-    """
-    Albumentations transforms for RGB images + binary masks.
-
-    Goals:
-    - Fixed spatial size across splits (robust batching + stable eval)
-    - Train: moderate geo + photo augs
-    - Valid/Test: deterministic (no random aug), only resize/pad + normalization
-    - Safe mask handling (NEAREST for masks, fill_mask=0)
-
-    Returns:
-        geo_tf, photo_tf, to_tensor
-    """
     assert mode in ("train", "valid", "test"), f"Invalid mode: {mode}"
 
     # Deterministic size policy for all splits.
@@ -112,55 +104,3 @@ def get_transforms(
     to_tensor = ToTensorV2(transpose_mask=True)
 
     return geo_tf, photo_tf, to_tensor
-
-def get_simclr_transforms(image_size=256):
-    """
-    Transformacije za SimCLR kontrastno učenje.
-    """
-    return transforms.Compose([
-        transforms.ToPILImage(),
-        transforms.RandomResizedCrop(image_size, scale=(0.4, 1.0)),
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomVerticalFlip(p=0.5),
-        transforms.RandomRotation(10),
-
-        transforms.RandomApply([
-            RGBOnlyColorJitter(0.4, 0.4, 0.4, 0.1)
-        ], p=0.8),
-
-        transforms.RandomGrayscale(p=0.1),
-
-        # Random blur
-        transforms.RandomApply([
-            transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 0.8))
-        ], p=0.5),
-
-        transforms.ToTensor()
-    ])
-
-# Applying ColorJitter only to the RGB channels of an image
-class RGBOnlyColorJitter:
-    def __init__(self, brightness=0.0, contrast=0.0, saturation=0.0, hue=0.0):
-        self.jitter = ColorJitter(brightness, contrast, saturation, hue)
-
-    def __call__(self, img):
-        # 1) osigurajte PIL input
-        if not isinstance(img, Image.Image):
-            img = to_pil_image(img)
-
-        # 2) splitajte na numpy array
-        arr = np.array(img)  # shape (H, W, C)
-        rgb, rest = arr[:, :, :3], arr[:, :, 3:] if arr.shape[2] > 3 else None
-
-        # 3) jitter na RGB
-        rgb_j = self.jitter(Image.fromarray(rgb))
-
-        # 4) spojite natrag
-        rgb_j_arr = np.array(rgb_j)
-        if rest is not None:
-            combined = np.concatenate([rgb_j_arr, rest], axis=2)
-        else:
-            combined = rgb_j_arr
-
-        # 5) vratite PIL image
-        return Image.fromarray(combined.astype(np.uint8))
