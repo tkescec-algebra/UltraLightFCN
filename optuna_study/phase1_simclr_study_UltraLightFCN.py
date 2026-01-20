@@ -28,7 +28,6 @@ import random
 from pathlib import Path
 from typing import List, Tuple, Dict
 
-import numpy as np
 import torch
 import optuna
 from torch.utils.data import DataLoader
@@ -39,7 +38,7 @@ from timm.scheduler import CosineLRScheduler
 from utils.config import ENCODER_PARAMS
 from utils.dataset import SimCLRSolarPanelDataset
 from utils.repro import set_global_seed, GLOBAL_SEED, seed_worker
-from utils.helpers import clear_cuda_cache, infer_subset_from_filename, make_reduced_file_list
+from utils.helpers import clear_cuda_cache, infer_subset_from_filename, make_reduced_file_list, steps_per_epoch
 from utils.loss_functions import NTXentLoss
 from models.UltraLightFCN_SimCLR import UltraLightEncoder, ProjectionHead, SimCLRModel
 
@@ -50,29 +49,53 @@ torch.multiprocessing.set_sharing_strategy("file_system")
 # -------------------------------------------------------------------------
 set_global_seed(GLOBAL_SEED, deterministic=False)
 
+# -------------------------------------------------------------------------
+# 1) Configuration
+# -------------------------------------------------------------------------
+from dataclasses import dataclass
 
-# -------------------------------------------------------------------------
-# 1) Constants / configuration
-# -------------------------------------------------------------------------
+
+@dataclass
+class Phase1Config:
+    # Data
+    data_root: str = "../dataset/train"  # image-only folder for SimCLR
+
+    # Train budget
+    simclr_bs: int = 256
+    epochs: int = 40
+    drop_last: bool = True
+
+    # Reduced pool settings (speed-up for HPO)
+    reduce_max_total: int = 5120  # max total images in reduced pool
+
+    # Pretrain validation split (within the reduced pool)
+    pretrain_val_frac: float = 0.10
+
+    # HPO stability knobs
+    warmup_epochs: int = 8      # do not allow pruning before this epoch index is reached
+    last_k_epochs: int = 10     # objective = average of last K validation ratios
+
+    # Store deterministic file lists (pool/train/val) for reproducibility
+    run_dir: str = "runs/simclr_hpo"
+
+    # Optuna
+    study_name: str = "UltraLightFCN_SimCLR_pretrain_RGB"
+    storage: str = "sqlite:///UltraLightFCN_study.db"
+    n_trials: int = 70
+    timeout_sec: int = 24 * 60 * 60
+
+    # Pruner
+    pruner_n_startup_trials: int = 10
+    pruner_n_warmup_steps: int = 8
+    pruner_interval_steps: int = 1
+
+
+CFG = Phase1Config()
+
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-DATA_ROOT = "/workspace/UltraLightFCN/dataset/train"   # image-only folder for SimCLR
 
-SIMCLR_BS = 256
-EPOCHS = 40
-DROP_LAST = True
-
-# Reduced pool settings (speed-up for HPO)
-REDUCE_MAX_TOTAL = 5120  # max total images in reduced pool
-
-# Pretrain validation split (within the reduced pool)
-PRETRAIN_VAL_FRAC = 0.10
-
-# HPO stability knobs
-WARMUP_EPOCHS = 8      # do not allow pruning before this epoch index is reached
-LAST_K_EPOCHS = 10     # objective = average of last K validation ratios
-
-# Store deterministic file lists (pool/train/val) for reproducibility
-RUN_DIR = Path("runs/simclr_hpo")
+# Derived paths
+RUN_DIR = Path(CFG.run_dir)
 RUN_DIR.mkdir(parents=True, exist_ok=True)
 POOL_LIST_PATH = RUN_DIR / "pretrain_pool_files.txt"
 TRAIN_LIST_PATH = RUN_DIR / "pretrain_train_files.txt"
@@ -132,14 +155,14 @@ def get_or_create_pretrain_splits() -> Tuple[List[str], List[str]]:
         return train_files, val_files
 
     pool = make_reduced_file_list(
-        DATA_ROOT,
-        max_total=REDUCE_MAX_TOTAL,
+        CFG.data_root,
+        max_total=CFG.reduce_max_total,
         seed=GLOBAL_SEED,
     )
     if len(pool) == 0:
-        raise RuntimeError(f"No images found in {DATA_ROOT}. Check your path/extensions.")
+        raise RuntimeError(f"No images found in {CFG.data_root}. Check your path/extensions.")
 
-    train_files, val_files = stratified_split_files(pool, val_frac=PRETRAIN_VAL_FRAC, seed=GLOBAL_SEED)
+    train_files, val_files = stratified_split_files(pool, val_frac=CFG.pretrain_val_frac, seed=GLOBAL_SEED)
 
     _save_list(POOL_LIST_PATH, pool)
     _save_list(TRAIN_LIST_PATH, train_files)
@@ -155,20 +178,8 @@ def get_or_create_pretrain_splits() -> Tuple[List[str], List[str]]:
 
 PRETRAIN_TRAIN_FILES, PRETRAIN_VAL_FILES = get_or_create_pretrain_splits()
 
-
 # -------------------------------------------------------------------------
-# 3) Helper: steps per epoch calculation and worker seeding
-# -------------------------------------------------------------------------
-def steps_per_epoch(n: int, bs: int, drop_last: bool) -> int:
-    """Number of optimizer updates per epoch."""
-    if n <= 0:
-        return 0
-    if drop_last:
-        return max(1, n // bs)
-    return max(1, math.ceil(n / bs))
-
-# -------------------------------------------------------------------------
-# 4) Optuna objective (one trial)
+# 3) Optuna objective (one trial)
 # -------------------------------------------------------------------------
 def objective(trial: optuna.Trial) -> float:
     """
@@ -184,7 +195,7 @@ def objective(trial: optuna.Trial) -> float:
     # Reproducibility per trial
     set_global_seed(GLOBAL_SEED, deterministic=False)
 
-    # 4.1 Hyperparameters to tune
+    # Hyperparameters to tune
     simclr_lr = trial.suggest_float("simclr_lr", 3e-5, 3e-3, log=True)
     simclr_temperature = trial.suggest_float("simclr_temperature", 0.05, 1.0, log=True)
     wd = trial.suggest_float("weight_decay", 1e-6, 1e-3, log=True)
@@ -193,13 +204,13 @@ def objective(trial: optuna.Trial) -> float:
     proj_out_dim = trial.suggest_categorical("proj_out_dim", [64, 128])
     max_grad_norm = trial.suggest_categorical("max_grad_norm", [0.5, 1.0, 2.0])
 
-    # 4.2 Dataset / loaders (fixed file lists)
-    simclr_train_ds = SimCLRSolarPanelDataset(DATA_ROOT, image_size=256, files=PRETRAIN_TRAIN_FILES)
-    simclr_val_ds = SimCLRSolarPanelDataset(DATA_ROOT, image_size=256, files=PRETRAIN_VAL_FILES)
+    # Dataset / loaders (fixed file lists)
+    simclr_train_ds = SimCLRSolarPanelDataset(CFG.data_root, image_size=256, files=PRETRAIN_TRAIN_FILES)
+    simclr_val_ds = SimCLRSolarPanelDataset(CFG.data_root, image_size=256, files=PRETRAIN_VAL_FILES)
 
     n_train = len(simclr_train_ds)
-    drop_last_trial = DROP_LAST
-    if DROP_LAST and n_train < SIMCLR_BS:
+    drop_last_trial = CFG.drop_last
+    if CFG.drop_last and n_train < CFG.simclr_bs:
         drop_last_trial = False
 
     # Deterministic sampling + deterministic worker RNG for THIS trial
@@ -211,7 +222,7 @@ def objective(trial: optuna.Trial) -> float:
 
     train_loader = DataLoader(
         simclr_train_ds,
-        batch_size=SIMCLR_BS,
+        batch_size=CFG.simclr_bs,
         shuffle=True,
         pin_memory=True,
         drop_last=drop_last_trial,
@@ -224,7 +235,7 @@ def objective(trial: optuna.Trial) -> float:
 
     val_loader = DataLoader(
         simclr_val_ds,
-        batch_size=SIMCLR_BS,
+        batch_size=CFG.simclr_bs,
         shuffle=False,
         pin_memory=True,
         drop_last=False,
@@ -235,9 +246,9 @@ def objective(trial: optuna.Trial) -> float:
         generator=g_val,
     )
 
-    # 4.3 Step-based schedule setup
-    spe = steps_per_epoch(n_train, SIMCLR_BS, drop_last_trial)
-    total_steps = EPOCHS * spe
+    # Step-based schedule setup
+    spe = steps_per_epoch(n_train, CFG.simclr_bs, drop_last_trial)
+    total_steps = CFG.epochs * spe
     if total_steps <= 0:
         raise optuna.TrialPruned()
 
@@ -270,7 +281,7 @@ def objective(trial: optuna.Trial) -> float:
     # Log metadata (useful for debugging / thesis reproducibility appendix)
     trial.set_user_attr("n_train", int(len(simclr_train_ds)))
     trial.set_user_attr("n_val", int(len(simclr_val_ds)))
-    trial.set_user_attr("batch_size", int(SIMCLR_BS))
+    trial.set_user_attr("batch_size", int(CFG.simclr_bs))
     trial.set_user_attr("drop_last_trial", bool(drop_last_trial))
     trial.set_user_attr("steps_per_epoch", int(spe))
     trial.set_user_attr("total_steps", int(total_steps))
@@ -289,14 +300,14 @@ def objective(trial: optuna.Trial) -> float:
     epoch_val_ratios: List[float] = []
     global_step = 0
 
-    for epoch in range(EPOCHS):
+    for epoch in range(CFG.epochs):
         # ---- TRAIN ----
         model.train()
         seen = 0
 
         for xi, xj, *_ in tqdm(
                 train_loader,
-                desc=f"[Trial {trial.number}] Train {epoch + 1}/{EPOCHS}",
+                desc=f"[Trial {trial.number}] Train {epoch + 1}/{CFG.epochs}",
                 leave=False,
                 mininterval=1.0,  # NEW: reduces tqdm overhead a bit
         ):
@@ -339,7 +350,7 @@ def objective(trial: optuna.Trial) -> float:
         with torch.no_grad():
             for xi, xj, *_ in tqdm(
                     val_loader,
-                    desc=f"[Trial {trial.number}] Val {epoch + 1}/{EPOCHS}",
+                    desc=f"[Trial {trial.number}] Val {epoch + 1}/{CFG.epochs}",
                     leave=False,
                     mininterval=1.0,  # NEW
             ):
@@ -372,19 +383,19 @@ def objective(trial: optuna.Trial) -> float:
         trial.report(val_ratio, step=epoch)
 
         # Manual warm-up guard: do not prune too early (SSL metrics can be noisy at start).
-        if epoch >= WARMUP_EPOCHS and trial.should_prune():
+        if epoch >= CFG.warmup_epochs and trial.should_prune():
             raise optuna.TrialPruned()
 
         current_lr = opt.param_groups[0]["lr"]
         print(
-            f"[Trial {trial.number}] Epoch {epoch+1}/{EPOCHS} | "
+            f"[Trial {trial.number}] Epoch {epoch+1}/{CFG.epochs} | "
             f"LR_now={current_lr:.3e} | simclr_lr={simclr_lr:.3e} | WD={wd:.2e} | T={simclr_temperature:.3g} | "
             f"warmup_ratio={warmup_ratio:.2f} | proj=({proj_hidden_dim}->{proj_out_dim}) | "
             f"clip={max_grad_norm} | val_ratio={val_ratio:.4f}"
         )
 
-    # Objective: average of LAST_K_EPOCHS validation ratios
-    k = min(LAST_K_EPOCHS, len(epoch_val_ratios))
+    # Objective: average of CFG.last_k_epochs validation ratios
+    k = min(CFG.last_k_epochs, len(epoch_val_ratios))
     avg_last_k = float(sum(epoch_val_ratios[-k:]) / k)
 
     trial.set_user_attr("objective_avg_last_k_val_ratio", avg_last_k)
@@ -395,7 +406,7 @@ def objective(trial: optuna.Trial) -> float:
 
 
 # -------------------------------------------------------------------------
-# 5) Study runner
+# 4) Study runner
 # -------------------------------------------------------------------------
 def main():
     # Reproducible sampler
@@ -403,15 +414,15 @@ def main():
 
     # Robust pruner for noisy SSL objectives
     pruner = optuna.pruners.MedianPruner(
-        n_startup_trials=10,
-        n_warmup_steps=8,
-        interval_steps=1,
+        n_startup_trials=CFG.pruner_n_startup_trials,
+        n_warmup_steps=CFG.pruner_n_warmup_steps,
+        interval_steps=CFG.pruner_interval_steps,
     )
 
     study = optuna.create_study(
         direction="minimize",
-        study_name="UltraLightFCN_SimCLR_pretrain_RGB",
-        storage="sqlite:///UltraLightFCN_study.db",
+        study_name=CFG.study_name,
+        storage=CFG.storage,
         load_if_exists=True,
         sampler=sampler,
         pruner=pruner,
@@ -419,8 +430,8 @@ def main():
 
     study.optimize(
         objective,
-        n_trials=70,
-        timeout=24 * 60 * 60,
+        n_trials=CFG.n_trials,
+        timeout=CFG.timeout_sec,
         callbacks=[clear_cuda_cache],
     )
 

@@ -110,23 +110,6 @@ def save_best_callback(study: optuna.Study, trial: optuna.trial.FrozenTrial):
         )
         print(f"[ckpt] Saved the weight of the best trail in checkpoints/{study.study_name}-best_trial{trial.number}.pth")
 
-# Function to build 2D sine-cosine positional embeddings for self-attention
-def build_2d_sincos_pos_emb(H, W, C, device):
-    assert C % 4 == 0, "SA d_model (channels) should be divisible by 4 for sin-cos PE."
-    y = torch.linspace(0, 1, H, device=device)
-    x = torch.linspace(0, 1, W, device=device)
-    yy, xx = torch.meshgrid(y, x, indexing='ij')
-    dim = C // 4
-    omega = 1.0 / (10000 ** (torch.arange(dim, device=device) / dim))
-    pos = torch.cat([
-        torch.sin(yy[..., None] * omega),
-        torch.cos(yy[..., None] * omega),
-        torch.sin(xx[..., None] * omega),
-        torch.cos(xx[..., None] * omega),
-    ], dim=-1).view(H * W, C)  # (N, C)
-    return pos
-
-
 # Function to infer subset from filename
 def infer_subset_from_filename(name: str) -> str:
     m = re.compile(r"^(PV\d{2})[-_]").match(name)
@@ -235,6 +218,7 @@ def make_reduced_file_list(
 
     return selected
 
+# Function to estimate pos_weight from masks
 def estimate_pos_weight_from_masks(
     train_dir: str,
     max_images: int = 500,
@@ -284,3 +268,20 @@ def estimate_pos_weight_from_masks(
 
     return float(neg / pos)
 
+# Function to calculate steps per epoch
+def steps_per_epoch(n_items: int, batch_size: int, drop_last: bool) -> int:
+    """Number of optimizer updates per epoch (iteration-based scheduler).
+
+    - drop_last=True  -> floor(n / bs)
+    - drop_last=False -> ceil(n / bs) via integer math
+    - returns 0 only when n_items <= 0
+    - never returns 0 when n_items > 0 (robust for schedulers)
+    """
+    if n_items <= 0:
+        return 0
+    if batch_size <= 0:
+        raise ValueError("batch_size must be > 0")
+
+    if drop_last:
+        return max(1, n_items // batch_size)
+    return max(1, (n_items + batch_size - 1) // batch_size)

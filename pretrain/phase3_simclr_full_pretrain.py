@@ -24,12 +24,10 @@ import copy
 import csv
 import json
 import time
-import random
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional
 
-import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from torch.amp import autocast, GradScaler
@@ -41,6 +39,7 @@ from tqdm import tqdm
 from utils.config import ENCODER_PARAMS
 # Project imports (keep consistent with Phase 1/2)
 from utils.dataset import SimCLRSolarPanelDataset
+from utils.helpers import steps_per_epoch
 from utils.loss_functions import NTXentLoss
 from utils.repro import set_global_seed, seed_worker
 from utils.metrics_simclr import simclr_alignment, simclr_uniformity
@@ -58,16 +57,16 @@ torch.multiprocessing.set_sharing_strategy("file_system")
 @dataclass
 class Phase3Config:
     # Data
-    train_dir: str = "/workspace/UltraLightFCN/dataset/train"
+    train_dir: str = "../dataset/train"
     image_size: int = 256
 
     # Output
-    out_dir: str = "/workspace/UltraLightFCN/pretrain/checkpoints/simclr_phase3"
+    out_dir: str = "checkpoints/simclr_phase3"
     run_tag: str = "phase3_full_pretrain"
 
     # Phase 2 results (used to pull the best SimCLR hyperparameters)
     # IMPORTANT: this CSV must come from Phase 2 (top-K retrain + downstream warm-up ranking).
-    phase2_results_csv: str = "/workspace/UltraLightFCN/pretrain/checkpoints/simclr_topk_retrain_downstream/phase2_topk_results.csv"
+    phase2_results_csv: str = "checkpoints/simclr_topk_retrain_downstream/phase2_topk_results.csv"
 
     # Seeds
     # Using 1 seed is acceptable for SSL full pretrain if compute is limited.
@@ -119,11 +118,6 @@ def list_images_no_masks_sorted(folder: str) -> List[str]:
             continue
         files.append(name)
     return sorted(files)
-
-def steps_per_epoch(n_items: int, batch_size: int, drop_last: bool) -> int:
-    if drop_last:
-        return n_items // batch_size
-    return (n_items + batch_size - 1) // batch_size
 
 
 # -----------------------------------------------------------------------------

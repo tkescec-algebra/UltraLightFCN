@@ -17,13 +17,10 @@ Notes:
 from __future__ import annotations
 
 import os
-import math
 import csv
-import random
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
 
-import numpy as np
 import optuna
 import torch
 from torch.utils.data import DataLoader
@@ -37,59 +34,63 @@ from utils.loss_functions import NTXentLoss, BCEDiceLoss
 from utils.dataset import SimCLRSolarPanelDataset, SolarPanelDataset
 from utils.metrics import calculate_dice
 from pretrain.utils.metrics_simclr import simclr_alignment, simclr_uniformity
-from utils.helpers import estimate_pos_weight_from_masks
+from utils.helpers import estimate_pos_weight_from_masks, steps_per_epoch
 from models.UltraLightFCN_SimCLR import UltraLightEncoder, ProjectionHead, SimCLRModel
 from models.UltraLightFCN_base import UltraLightFCN
-
+from dataclasses import dataclass
 
 # -----------------------------
-# Config
+# Configuration
 # -----------------------------
+
+@dataclass
+class Phase2Config:
+    # Phase 1 Optuna study (SimCLR HPO)
+    storage: str = "sqlite:///../optuna_study/UltraLightFCN_study.db"
+    study_name: str = "UltraLightFCN_SimCLR_pretrain_RGB"
+    topk: int = 10
+
+    # Dataset paths
+    data_root: str = "../dataset"
+    train_dir: str = "../dataset/train"   # downstream TRAIN (80%)
+    val_dir: str = "../dataset/valid"     # downstream VALID (10%)
+
+    # SimCLR retrain budget
+    simclr_image_size: int = 256
+    simclr_epochs: int = 40
+    simclr_bs_default: int = 256
+    drop_last: bool = True
+
+    # SimCLR representation diagnostics (do NOT use for model selection)
+    simclr_metric_bs: int = 256
+    simclr_metric_num_batches: int = 2
+    simclr_uniformity_t: float = 2.0
+
+    # Output
+    out_dir: str = "checkpoints/simclr_topk_retrain_downstream"
+
+    # Mini segmentation warm-up (controlled downstream evaluation)
+    mini_seg_epochs: int = 5
+    mini_seg_max_steps: int = 1200
+    mini_seg_bs: int = 16
+    mini_seg_lr: float = 1e-3
+    mini_seg_wd: float = 1e-4
+
+    # Mini warm-up loss settings
+    mini_seg_bce_weight: float = 0.4
+    mini_seg_dice_weight: float = 0.6
+
+    # Freeze policy for mini seg warm-up:
+    encoder_prefixes: tuple = (
+        "block1", "dsconv2", "dsconv3", "dilconv4", "dilconv5", "mini_aspp", "sa"
+    )
+
+
+CFG = Phase2Config()
+
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# Phase 1 Optuna study (SimCLR HPO)
-STORAGE = "sqlite:////workspace/UltraLightFCN/optuna_study/UltraLightFCN_study.db"
-STUDY_NAME = "UltraLightFCN_SimCLR_pretrain_RGB"
-TOPK = 10
-
-# Dataset paths
-DATA_ROOT = "/workspace/UltraLightFCN/dataset"
-TRAIN_DIR = os.path.join(DATA_ROOT, "train")   # downstream TRAIN (80%)
-VAL_DIR   = os.path.join(DATA_ROOT, "valid")   # downstream VALID (10%)
-
-# SimCLR retrain budget
-SIMCLR_IMAGE_SIZE = 256
-SIMCLR_EPOCHS = 40
-SIMCLR_BS_DEFAULT = 256
-DROP_LAST = True
-
-
-# SimCLR representation diagnostics (do NOT use for model selection)
-SIMCLR_METRIC_BS = 256          # smaller batch for O(B^2) uniformity computation
-SIMCLR_METRIC_NUM_BATCHES = 2   # number of batches to estimate metrics (fixed compute)
-SIMCLR_UNIFORMITY_T = 2.0
-
-# Output
-OUT_DIR = Path("/workspace/UltraLightFCN/pretrain/checkpoints/simclr_topk_retrain_downstream")
+OUT_DIR = Path(CFG.out_dir)
 OUT_DIR.mkdir(parents=True, exist_ok=True)
-
-# Mini segmentation warm-up (controlled downstream evaluation)
-MINI_SEG_EPOCHS = 5
-MINI_SEG_MAX_STEPS = 1200   # cap steps to keep compute fixed across candidates
-MINI_SEG_BS = 16
-MINI_SEG_LR = 1e-3
-MINI_SEG_WD = 1e-4
-
-# Mini warm-up loss settings (should match the main segmentation recipe as closely as possible)
-MINI_SEG_BCE_WEIGHT = 0.4
-MINI_SEG_DICE_WEIGHT = 0.6
-
-# Freeze policy for mini seg warm-up:
-# Freeze the encoder/bottleneck; train only decoder/head to measure representation quality.
-ENCODER_PREFIXES = (
-    "block1", "dsconv2", "dsconv3", "dilconv4", "dilconv5", "mini_aspp", "sa"
-)
-
 
 # -----------------------------
 # Repro helpers
@@ -112,15 +113,6 @@ def list_images_no_masks(data_dir: str) -> List[str]:
     if not files:
         raise RuntimeError(f"No images found in: {data_dir}")
     return files
-
-
-def steps_per_epoch(n_samples: int, batch_size: int, drop_last: bool) -> int:
-    if n_samples <= 0:
-        return 0
-    if drop_last:
-        return n_samples // batch_size
-    return math.ceil(n_samples / batch_size)
-
 
 # -----------------------------
 # SimCLR build / train
@@ -153,17 +145,17 @@ def retrain_simclr_candidate(
     proj_hidden_dim = int(params.get("proj_hidden_dim", 128))
     proj_out_dim = int(params.get("proj_out_dim", 64))
     max_grad_norm = float(params.get("max_grad_norm", 1.0))
-    simclr_bs = int(params.get("batch_size", SIMCLR_BS_DEFAULT))
+    simclr_bs = int(params.get("batch_size", CFG.simclr_bs_default))
 
     simclr_train_ds = SimCLRSolarPanelDataset(
-        data_dir=TRAIN_DIR,
-        image_size=SIMCLR_IMAGE_SIZE,
+        data_dir=CFG.train_dir,
+        image_size=CFG.simclr_image_size,
         files=simclr_train_files,
     )
     n_train = len(simclr_train_ds)
 
-    drop_last_trial = DROP_LAST
-    if DROP_LAST and n_train < simclr_bs:
+    drop_last_trial = CFG.drop_last
+    if CFG.drop_last and n_train < simclr_bs:
         drop_last_trial = False
 
     g_train = torch.Generator().manual_seed(GLOBAL_SEED)
@@ -183,7 +175,7 @@ def retrain_simclr_candidate(
 
     # Scheduling in update-steps
     spe = steps_per_epoch(n_train, simclr_bs, drop_last_trial)
-    total_steps = SIMCLR_EPOCHS * spe
+    total_steps = CFG.simclr_epochs * spe
     if total_steps <= 0:
         raise RuntimeError(f"Invalid total_steps={total_steps} (n_train={n_train}, bs={simclr_bs})")
 
@@ -207,12 +199,12 @@ def retrain_simclr_candidate(
     global_step = 0
     last_epoch_loss = None
 
-    for epoch in range(SIMCLR_EPOCHS):
+    for epoch in range(CFG.simclr_epochs):
         model.train()
         running = 0.0
         seen = 0
 
-        for xi, xj, *_ in tqdm(train_loader, desc=f"Trial{trial_number} SimCLR {epoch+1}/{SIMCLR_EPOCHS}", leave=False):
+        for xi, xj, *_ in tqdm(train_loader, desc=f"Trial{trial_number} SimCLR {epoch+1}/{CFG.simclr_epochs}", leave=False):
             B = xi.size(0)
             if B < 2:
                 continue
@@ -246,7 +238,7 @@ def retrain_simclr_candidate(
         last_epoch_loss = running / seen
         lr_now = opt.param_groups[0]["lr"]
         print(
-            f"[Retrain trial {trial_number}] Epoch {epoch+1}/{SIMCLR_EPOCHS} | "
+            f"[Retrain trial {trial_number}] Epoch {epoch+1}/{CFG.simclr_epochs} | "
             f"lr={lr_now:.3e} | train_loss={last_epoch_loss:.4f}"
         )
 
@@ -255,9 +247,9 @@ def retrain_simclr_candidate(
     align_val, uni_val = compute_simclr_alignment_uniformity(
         model=model,
         dataset=simclr_train_ds,
-        metric_bs=SIMCLR_METRIC_BS  ,
-        num_batches=SIMCLR_METRIC_NUM_BATCHES,
-        t_uniform=SIMCLR_UNIFORMITY_T,
+        metric_bs=CFG.simclr_metric_bs  ,
+        num_batches=CFG.simclr_metric_num_batches,
+        t_uniform=CFG.simclr_uniformity_t,
     )
     print(f"[Metrics] trial {trial_number} | alignment={align_val:.6f} | uniformity={uni_val:.6f}")
 
@@ -267,8 +259,8 @@ def retrain_simclr_candidate(
         "trial_number": int(trial_number),
         "optuna_proxy_value": float(optuna_value),
         "params": dict(params),
-        "simclr_epochs": int(SIMCLR_EPOCHS),
-        "train_dir": str(TRAIN_DIR),
+        "simclr_epochs": int(CFG.simclr_epochs),
+        "train_dir": str(CFG.train_dir),
         "n_train_files": int(len(simclr_train_files)),
         "global_seed": int(GLOBAL_SEED),
     }
@@ -375,7 +367,7 @@ def freeze_encoder_params(model: UltraLightFCN) -> None:
     This makes the metric more indicative of representation quality.
     """
     for name, p in model.named_parameters():
-        if name.startswith(ENCODER_PREFIXES):
+        if name.startswith(CFG.encoder_prefixes):
             p.requires_grad = False
 
 
@@ -388,7 +380,7 @@ def assert_encoder_frozen(model: torch.nn.Module) -> None:
     enc_trainable = 0
 
     for name, p in model.named_parameters():
-        if name.startswith(ENCODER_PREFIXES):
+        if name.startswith(CFG.encoder_prefixes):
             enc_total += p.numel()
             if p.requires_grad:
                 enc_trainable += p.numel()
@@ -396,7 +388,7 @@ def assert_encoder_frozen(model: torch.nn.Module) -> None:
     if enc_total == 0:
         raise AssertionError(
             "No parameters matched encoder_prefixes. "
-            "Check ENCODER_PREFIXES vs model.named_parameters() names."
+            "Check CFG.encoder_prefixes vs model.named_parameters() names."
         )
 
     if enc_trainable > 0:
@@ -458,15 +450,15 @@ def mini_seg_warmup_eval(encoder_ckpt_path: str, pos_weight: float | None) -> fl
     set_global_seed(GLOBAL_SEED, deterministic=False)
     scaler = GradScaler("cuda", enabled=(DEVICE.type == "cuda"))
 
-    train_ds = SolarPanelDataset(TRAIN_DIR, mode="train", return_extra=False)
-    val_ds = SolarPanelDataset(VAL_DIR, mode="valid", return_extra=False)
+    train_ds = SolarPanelDataset(CFG.train_dir, mode="train", return_extra=False)
+    val_ds = SolarPanelDataset(CFG.val_dir, mode="valid", return_extra=False)
 
     g_train = torch.Generator().manual_seed(GLOBAL_SEED)
     g_val = torch.Generator().manual_seed(GLOBAL_SEED + 12345)
 
     train_loader = DataLoader(
         train_ds,
-        batch_size=MINI_SEG_BS,
+        batch_size=CFG.mini_seg_bs,
         shuffle=True,
         pin_memory=True,
         drop_last=True,
@@ -478,7 +470,7 @@ def mini_seg_warmup_eval(encoder_ckpt_path: str, pos_weight: float | None) -> fl
     )
     val_loader = DataLoader(
         val_ds,
-        batch_size=MINI_SEG_BS,
+        batch_size=CFG.mini_seg_bs,
         shuffle=False,
         pin_memory=True,
         drop_last=False,
@@ -496,17 +488,17 @@ def mini_seg_warmup_eval(encoder_ckpt_path: str, pos_weight: float | None) -> fl
 
     criterion = BCEDiceLoss(
         pos_weight=pos_weight,
-        bce_weight=MINI_SEG_BCE_WEIGHT,
-        dice_weight=MINI_SEG_DICE_WEIGHT,
+        bce_weight=CFG.mini_seg_bce_weight,
+        dice_weight=CFG.mini_seg_dice_weight,
     )
 
     trainable = [p for p in model.parameters() if p.requires_grad]
-    opt = torch.optim.AdamW(trainable, lr=MINI_SEG_LR, weight_decay=MINI_SEG_WD)
+    opt = torch.optim.AdamW(trainable, lr=CFG.mini_seg_lr, weight_decay=CFG.mini_seg_wd)
 
     step = 0
-    for epoch in range(MINI_SEG_EPOCHS):
+    for epoch in range(CFG.mini_seg_epochs):
         model.train()
-        for images, masks in tqdm(train_loader, desc=f"MiniSeg {epoch+1}/{MINI_SEG_EPOCHS}", leave=False):
+        for images, masks in tqdm(train_loader, desc=f"MiniSeg {epoch+1}/{CFG.mini_seg_epochs}", leave=False):
             images = images.to(DEVICE, non_blocking=True)
             masks = masks.to(DEVICE, non_blocking=True)
 
@@ -520,9 +512,9 @@ def mini_seg_warmup_eval(encoder_ckpt_path: str, pos_weight: float | None) -> fl
             scaler.update()
 
             step += 1
-            if step >= MINI_SEG_MAX_STEPS:
+            if step >= CFG.mini_seg_max_steps:
                 break
-        if step >= MINI_SEG_MAX_STEPS:
+        if step >= CFG.mini_seg_max_steps:
             break
 
     val_soft_dice = evaluate_soft_dice(model, val_loader)
@@ -534,19 +526,19 @@ def mini_seg_warmup_eval(encoder_ckpt_path: str, pos_weight: float | None) -> fl
 # -----------------------------
 def main() -> None:
     # Load top-K trials from Optuna DB
-    study = optuna.load_study(study_name=STUDY_NAME, storage=STORAGE)
+    study = optuna.load_study(study_name=CFG.study_name, storage=CFG.storage)
     complete = [t for t in study.trials if t.value is not None and t.state == optuna.trial.TrialState.COMPLETE]
     complete.sort(key=lambda t: t.value)  # minimize proxy
 
-    top_trials = complete[:TOPK]
-    print(f"Loaded {len(complete)} complete trials. Running retrain + mini-seg eval for top-{TOPK}.\n")
+    top_trials = complete[:CFG.topk]
+    print(f"Loaded {len(complete)} complete trials. Running retrain + mini-seg eval for top-{CFG.topk}.\n")
 
     # FULL downstream TRAIN file list for SimCLR retrain (no internal val)
-    train_files_full = list_images_no_masks(TRAIN_DIR)
+    train_files_full = list_images_no_masks(CFG.train_dir)
 
     # Estimate pos_weight from TRAIN masks for mini seg warm-up
     mini_pos_weight = estimate_pos_weight_from_masks(
-        train_dir=TRAIN_DIR,
+        train_dir=CFG.train_dir,
         max_images=1000,  # 300–1000
         seed=GLOBAL_SEED
     )
@@ -564,7 +556,7 @@ def main() -> None:
 
     rows: List[Dict[str, Any]] = []
     for rank, t in enumerate(top_trials, start=1):
-        print(f"\n=== Candidate #{rank}/{TOPK}: trial {t.number} (proxy={t.value:.6f}) ===")
+        print(f"\n=== Candidate #{rank}/{CFG.topk}: trial {t.number} (proxy={t.value:.6f}) ===")
 
         retrain_row = retrain_simclr_candidate(
             trial_number=t.number,
@@ -577,8 +569,8 @@ def main() -> None:
         mini_dice = mini_seg_warmup_eval(retrain_row["ckpt_path"], pos_weight=mini_pos_weight)
         retrain_row["mini_val_soft_dice"] = float(mini_dice)
         retrain_row["mini_seg_pos_weight"] = mini_pos_weight
-        retrain_row["mini_seg_bce_weight"] = float(MINI_SEG_BCE_WEIGHT)
-        retrain_row["mini_seg_dice_weight"] = float(MINI_SEG_DICE_WEIGHT)
+        retrain_row["mini_seg_bce_weight"] = float(CFG.mini_seg_bce_weight)
+        retrain_row["mini_seg_dice_weight"] = float(CFG.mini_seg_dice_weight)
 
         print(f"[MiniSeg] trial {t.number} | val_soft_dice={mini_dice:.4f}")
 
