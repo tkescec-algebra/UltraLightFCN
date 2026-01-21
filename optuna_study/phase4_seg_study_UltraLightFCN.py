@@ -33,7 +33,7 @@ from tqdm import tqdm
 from utils.config import SEG_PARAMS
 from models.UltraLightFCN_base import UltraLightFCN
 from utils.dataset import SolarPanelDataset
-from utils.helpers import clear_cuda_cache, get_loss_function
+from utils.helpers import clear_cuda_cache, get_loss_function, split_encoder_decoder_params
 from utils.load_simclr_pretrain_encoder import load_pretrained_encoder_into_ultralight
 from utils.metrics import calculate_dice
 from utils.repro import seed_worker, set_global_seed, GLOBAL_SEED
@@ -79,9 +79,9 @@ class Phase4Config:
     # TRAIN can be subset for speed; VALID is full by default (paper-safe).
     use_hpo_subset: bool = True
     use_hpo_val_subset: bool = False  # <--- VALID full 100% unless explicitly enabled
-    hpo_subset_dir: str = "hpo_subsets"
-    hpo_train_list: str = os.path.join("hpo_subsets", "hpo_train_files.txt")
-    hpo_val_list: str = os.path.join("hpo_subsets", "hpo_val_files.txt")
+    hpo_subset_dir: str = "runs/hpo_subsets"
+    hpo_train_list: str = os.path.join(hpo_subset_dir, "hpo_train_files.txt")
+    hpo_val_list: str = os.path.join(hpo_subset_dir, "hpo_val_files.txt")
     hpo_train_frac: float = 0.20
     hpo_val_frac: float = 0.50  # only used if use_hpo_val_subset=True
     subset_seed_train: int = 42
@@ -252,35 +252,6 @@ def build_loss(trial: optuna.Trial):
         alpha_focal=alpha,
         gamma_focal=gamma,
     )
-
-
-def split_encoder_decoder_params(model: torch.nn.Module):
-    """Split params into (encoder_stack, decoder_stack).
-
-    Encoder stack includes:
-      - backbone blocks (block1, dsconv2, dsconv3, dilconv4, dilconv5)
-      - mini_aspp
-      - sa
-    """
-    enc_prefixes = (
-        "block1",
-        "dsconv2",
-        "dsconv3",
-        "dilconv4",
-        "dilconv5",
-        "mini_aspp",
-        "sa",
-    )
-
-    enc_params: List[torch.nn.Parameter] = []
-    dec_params: List[torch.nn.Parameter] = []
-    for name, p in model.named_parameters():
-        if name.startswith(enc_prefixes):
-            enc_params.append(p)
-        else:
-            dec_params.append(p)
-    return enc_params, dec_params
-
 
 def build_loaders(cfg: Phase4Config, batch_size: int, *, seed: int):
     train_dir = os.path.join(cfg.data_root, cfg.train_split)

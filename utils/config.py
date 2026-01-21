@@ -24,3 +24,13 @@ SEG_PARAMS.update({
     "dec_strides": [1, 1],
     "upscale": [2, 2],
 })
+
+ENCODER_PREFIXES: tuple[str, ...] = (
+    "block1",
+    "dsconv2",
+    "dsconv3",
+    "dilconv4",
+    "dilconv5",
+    "mini_aspp",
+    "sa",
+)

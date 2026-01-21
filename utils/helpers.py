@@ -1,8 +1,10 @@
+import csv
 import gc
+import json
 import os
 import re
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict, Any, Sequence, Callable
 
 import cv2
 import numpy as np
@@ -11,6 +13,7 @@ import torch
 import random
 import segmentation_models_pytorch as smp
 
+from utils.config import ENCODER_PREFIXES
 from utils.edge_detectors import sobel_detector, canny_detector, prewitt_detector, laplacian_detector
 from utils.loss_functions import BCEDiceLoss, BCEDiceTverskyLoss, BCEDiceFocalLoss
 
@@ -66,8 +69,8 @@ def get_loss_function(loss_name='BCEDiceLoss', **kwargs):
             bce_weight=kwargs.get('bce_weight', 0.4),
             dice_weight=kwargs.get('dice_weight', 0.3),
             focal_weight=kwargs.get('focal_weight', 0.3),
-            alpha_focal=kwargs.get('alpha', 0.25),
-            gamma_focal=kwargs.get('gamma', 2.0),
+            alpha_focal=kwargs.get('alpha_focal', 0.25),
+            gamma_focal=kwargs.get('gamma_focal', 2.0),
         )
     else:
         raise ValueError(f"Loss function {loss_name} not supported")
@@ -94,7 +97,14 @@ def get_model(model_name='base'):
         raise ValueError(f"Model {model_name} not supported")
 
 # Function to clear CUDA cache and collect garbage
-def clear_cuda_cache(study, trial):
+def clear_cuda_cache(*args, **kwargs):
+    """
+    Clear CUDA cache + run GC.
+
+    Works both as:
+      - Optuna callback: clear_cuda_cache(study, trial)
+      - Direct call: clear_cuda_cache()
+    """
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     gc.collect()
@@ -285,3 +295,74 @@ def steps_per_epoch(n_items: int, batch_size: int, drop_last: bool) -> int:
     if drop_last:
         return max(1, n_items // batch_size)
     return max(1, (n_items + batch_size - 1) // batch_size)
+
+# Function to split model parameters into encoder and decoder stacks
+def split_encoder_decoder_params(model: torch.nn.Module):
+    """Split params into (encoder_stack, decoder_stack).
+
+    Encoder stack includes:
+      - backbone blocks (block1, dsconv2, dsconv3, dilconv4, dilconv5)
+      - mini_aspp
+      - sa
+    """
+
+    enc_params: List[torch.nn.Parameter] = []
+    dec_params: List[torch.nn.Parameter] = []
+    for name, p in model.named_parameters():
+        if name.startswith(ENCODER_PREFIXES):
+            enc_params.append(p)
+        else:
+            dec_params.append(p)
+    return enc_params, dec_params
+
+# Functions to save JSON
+def save_json(path: str, obj: Dict[str, Any]) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(obj, f, indent=2)
+
+# Functions to save CSV rows
+def save_csv_rows(path: str, rows: List[Dict[str, Any]], fieldnames: Optional[Sequence[str]] = None) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if not rows:
+        return
+    keys = list(fieldnames) if fieldnames is not None else list(rows[0].keys())
+    with open(path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=keys)
+        w.writeheader()
+        w.writerows(rows)
+
+# Function to build loss from parameters
+def build_loss_from_params(
+    params: Dict[str, Any],
+    get_loss_fn: Callable[..., Any],
+):
+    """
+    Reconstruct Phase-4 loss exactly from candidate params (used in Phase-5 and Phase-6).
+    """
+    loss_name = params["loss"]
+
+    if loss_name == "BCEDiceLoss":
+        bce_w = float(params["bce_w"])
+        dice_w = 1.0 - bce_w
+        return loss_name, get_loss_fn("BCEDiceLoss", bce_weight=bce_w, dice_weight=dice_w)
+
+    if loss_name == "BCEDiceFocalLoss":
+        bce_w = float(params["bce_w"])
+        dice_w = float(params["dice_w"])
+        focal_w = 1.0 - (bce_w + dice_w)
+        if focal_w <= 0:
+            raise ValueError("Invalid loss weights: focal_w <= 0 (check candidate params).")
+
+        alpha = float(params["alpha_focal"])
+        gamma = float(params["gamma_focal"])
+        return loss_name, get_loss_fn(
+            "BCEDiceFocalLoss",
+            bce_weight=bce_w,
+            dice_weight=dice_w,
+            focal_weight=focal_w,
+            alpha_focal=alpha,
+            gamma_focal=gamma,
+        )
+
+    raise ValueError(f"Unsupported loss in candidate params: {loss_name}")
