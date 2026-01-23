@@ -78,7 +78,7 @@ class Phase5Config:
     top_k: int = 10
 
     # --------- Output
-    out_root: str = "../seg_phase5/topk"
+    out_root: str = "seg_phase5/topk_retrain"
     save_last_name: str = "last.pth"
     save_epoch_log_name: str = "epoch_log.csv"
     summary_csv_name: str = "phase5_topk_results.csv"
@@ -128,10 +128,11 @@ def _val_epoch(
     cfg: Phase5Config,
     *,
     use_amp: bool,
-) -> Tuple[float, float]:
-    """Return (soft_dice, hard_dice@thr) aggregated per-image across full validation."""
+    criterion,
+) -> Tuple[float, float, float]:
+    """Return (val_loss, soft_dice, hard_dice@thr) aggregated per-image across full validation."""
     model.eval()
-    soft_sum, hard_sum, n = 0.0, 0.0, 0
+    loss_sum, soft_sum, hard_sum, n = 0.0, 0.0, 0.0, 0
     with torch.no_grad():
         for images, masks in val_loader:
             images = images.to(cfg.device, non_blocking=True)
@@ -139,8 +140,10 @@ def _val_epoch(
 
             with autocast(device_type="cuda", enabled=use_amp):
                 logits = model(images)
+                loss = criterion(logits, masks)
 
             bs = int(images.shape[0])
+            loss_sum += float(loss.detach().cpu()) * bs
             soft = float(calculate_dice(logits, masks, thr=None))
             hard = float(calculate_dice(logits, masks, thr=cfg.hard_thr_monitor))
             soft_sum += soft * bs
@@ -148,8 +151,8 @@ def _val_epoch(
             n += bs
 
     if n == 0:
-        return 0.0, 0.0
-    return soft_sum / n, hard_sum / n
+        return 0.0, 0.0, 0.0
+    return loss_sum / n, soft_sum / n, hard_sum / n
 
 
 def run_one_candidate_one_seed(
@@ -234,7 +237,7 @@ def run_one_candidate_one_seed(
 
         train_loss = train_loss_sum / max(1, train_n)
 
-        val_soft, val_hard05 = _val_epoch(model, val_loader, cfg, use_amp=use_amp)
+        val_loss, val_soft, val_hard05 = _val_epoch(model, val_loader, cfg, use_amp=use_amp, criterion=criterion)
         scheduler.step(val_soft)
 
         last_k.append(val_soft)
@@ -253,6 +256,7 @@ def run_one_candidate_one_seed(
             {
                 "epoch": epoch + 1,
                 "train_loss": train_loss,
+                "val_loss": val_loss,
                 "val_soft": val_soft,
                 "val_hard05": val_hard05,
                 "avg_last_k_soft": avg_last_k,
