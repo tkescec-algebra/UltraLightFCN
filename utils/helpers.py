@@ -328,7 +328,7 @@ def save_csv_rows(path: str, rows: List[Dict[str, Any]], fieldnames: Optional[Se
         return
     keys = list(fieldnames) if fieldnames is not None else list(rows[0].keys())
     with open(path, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=keys)
+        w = csv.DictWriter(f, fieldnames=keys, extrasaction="ignore")
         w.writeheader()
         w.writerows(rows)
 
