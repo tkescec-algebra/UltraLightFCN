@@ -1,0 +1,7 @@
+variant,candidate_id,seed,loss_name,best_avg_last_k_soft,best_epoch,best_val_soft,best_val_hard05,final_val_soft,final_val_hard05,ckpt_last_path
+ablation1_pretrained_freeze,54,13,BCEDiceLoss,0.6811341107658146,26,0.6811931931860714,0.7106211815880215,0.6819241318646476,0.7124962965674184,seg_phase5/ablation/ablation1_pretrained_freeze/trial_54/seed_13/last.pth
+ablation1_pretrained_freeze,54,37,BCEDiceLoss,0.6817678844721564,29,0.6813979902841113,0.7117650718159616,0.6806823758534366,0.7084054123030185,seg_phase5/ablation/ablation1_pretrained_freeze/trial_54/seed_37/last.pth
+ablation1_pretrained_freeze,54,71,BCEDiceLoss,0.6811483929993644,30,0.6817411421904673,0.7134057014243472,0.6817411421904673,0.7134057014243472,seg_phase5/ablation/ablation1_pretrained_freeze/trial_54/seed_71/last.pth
+ablation2_scratch_finetune,54,13,BCEDiceLoss,0.7434715168685722,30,0.7451738613209872,0.9027399784337321,0.7451738613209872,0.9027399784337321,seg_phase5/ablation/ablation2_scratch_finetune/trial_54/seed_13/last.pth
+ablation2_scratch_finetune,54,37,BCEDiceLoss,0.7413723231323812,28,0.7416951372753051,0.8967284653145494,0.7436539288031836,0.89705091557778,seg_phase5/ablation/ablation2_scratch_finetune/trial_54/seed_37/last.pth
+ablation2_scratch_finetune,54,71,BCEDiceLoss,0.7401938224757456,29,0.7426197924599898,0.8968079113204829,0.7396222528334916,0.8978083110612598,seg_phase5/ablation/ablation2_scratch_finetune/trial_54/seed_71/last.pth

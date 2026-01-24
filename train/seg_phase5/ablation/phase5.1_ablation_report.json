@@ -1,0 +1,137 @@
+{
+  "phase": "A",
+  "timestamp": "2026-01-24T18:03:02.971431",
+  "data": {
+    "train": "train",
+    "valid": "valid",
+    "test_used": false
+  },
+  "fixed_protocol": {
+    "epochs": 30,
+    "avg_last_k": 10,
+    "seeds": [
+      13,
+      37,
+      71
+    ]
+  },
+  "winner_source": {
+    "phase5_winner_json": "seg_phase5/topk_retrain/phase5_winner.json",
+    "candidate_id": 54,
+    "params": {
+      "batch_size": 16,
+      "base_lr": 0.0070438813370146194,
+      "enc_lr_mult": 0.28552323346401925,
+      "weight_decay": 7.55567801215137e-05,
+      "rlop_factor": 0.3,
+      "rlop_patience": 2,
+      "loss": "BCEDiceLoss",
+      "bce_w": 0.3
+    },
+    "phase3_last_ckpt": "../pretrain/checkpoints/simclr_phase3/phase3_seed13_last.pth"
+  },
+  "baseline_pretrained_finetune": {
+    "mean_best_avg_last_k_soft": 0.745233999230364,
+    "std_best_avg_last_k_soft": 0.0010622006988646685,
+    "note": "Baseline is taken from Phase-5 (not rerun in Phase A)."
+  },
+  "ablations": {
+    "ablation1_pretrained_freeze": {
+      "best_avg_last_k_soft": {
+        "mean": 0.6813501294124451,
+        "std": 0.0002954549745557065
+      },
+      "runs": [
+        {
+          "variant": "ablation1_pretrained_freeze",
+          "candidate_id": 54,
+          "seed": 13,
+          "loss_name": "BCEDiceLoss",
+          "best_avg_last_k_soft": 0.6811341107658146,
+          "best_epoch": 26,
+          "best_val_soft": 0.6811931931860714,
+          "best_val_hard05": 0.7106211815880215,
+          "final_val_soft": 0.6819241318646476,
+          "final_val_hard05": 0.7124962965674184,
+          "ckpt_last_path": "seg_phase5/ablation/ablation1_pretrained_freeze/trial_54/seed_13/last.pth"
+        },
+        {
+          "variant": "ablation1_pretrained_freeze",
+          "candidate_id": 54,
+          "seed": 37,
+          "loss_name": "BCEDiceLoss",
+          "best_avg_last_k_soft": 0.6817678844721564,
+          "best_epoch": 29,
+          "best_val_soft": 0.6813979902841113,
+          "best_val_hard05": 0.7117650718159616,
+          "final_val_soft": 0.6806823758534366,
+          "final_val_hard05": 0.7084054123030185,
+          "ckpt_last_path": "seg_phase5/ablation/ablation1_pretrained_freeze/trial_54/seed_37/last.pth"
+        },
+        {
+          "variant": "ablation1_pretrained_freeze",
+          "candidate_id": 54,
+          "seed": 71,
+          "loss_name": "BCEDiceLoss",
+          "best_avg_last_k_soft": 0.6811483929993644,
+          "best_epoch": 30,
+          "best_val_soft": 0.6817411421904673,
+          "best_val_hard05": 0.7134057014243472,
+          "final_val_soft": 0.6817411421904673,
+          "final_val_hard05": 0.7134057014243472,
+          "ckpt_last_path": "seg_phase5/ablation/ablation1_pretrained_freeze/trial_54/seed_71/last.pth"
+        }
+      ]
+    },
+    "ablation2_scratch_finetune": {
+      "best_avg_last_k_soft": {
+        "mean": 0.7416792208255664,
+        "std": 0.0013555957555636817
+      },
+      "runs": [
+        {
+          "variant": "ablation2_scratch_finetune",
+          "candidate_id": 54,
+          "seed": 13,
+          "loss_name": "BCEDiceLoss",
+          "best_avg_last_k_soft": 0.7434715168685722,
+          "best_epoch": 30,
+          "best_val_soft": 0.7451738613209872,
+          "best_val_hard05": 0.9027399784337321,
+          "final_val_soft": 0.7451738613209872,
+          "final_val_hard05": 0.9027399784337321,
+          "ckpt_last_path": "seg_phase5/ablation/ablation2_scratch_finetune/trial_54/seed_13/last.pth"
+        },
+        {
+          "variant": "ablation2_scratch_finetune",
+          "candidate_id": 54,
+          "seed": 37,
+          "loss_name": "BCEDiceLoss",
+          "best_avg_last_k_soft": 0.7413723231323812,
+          "best_epoch": 28,
+          "best_val_soft": 0.7416951372753051,
+          "best_val_hard05": 0.8967284653145494,
+          "final_val_soft": 0.7436539288031836,
+          "final_val_hard05": 0.89705091557778,
+          "ckpt_last_path": "seg_phase5/ablation/ablation2_scratch_finetune/trial_54/seed_37/last.pth"
+        },
+        {
+          "variant": "ablation2_scratch_finetune",
+          "candidate_id": 54,
+          "seed": 71,
+          "loss_name": "BCEDiceLoss",
+          "best_avg_last_k_soft": 0.7401938224757456,
+          "best_epoch": 29,
+          "best_val_soft": 0.7426197924599898,
+          "best_val_hard05": 0.8968079113204829,
+          "final_val_soft": 0.7396222528334916,
+          "final_val_hard05": 0.8978083110612598,
+          "ckpt_last_path": "seg_phase5/ablation/ablation2_scratch_finetune/trial_54/seed_71/last.pth"
+        }
+      ]
+    }
+  },
+  "artifacts": {
+    "summary_csv": "seg_phase5/ablation/phase5.1_ablation_results.csv"
+  }
+}
