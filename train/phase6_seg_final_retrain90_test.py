@@ -36,7 +36,7 @@ from utils.helpers import (
     build_loss_from_params,
 )
 from utils.load_simclr_pretrain_encoder import load_pretrained_encoder_into_ultralight
-from utils.metrics import calculate_dice
+from utils.metrics import calculate_dice, calculate_iou, calculate_precision_recall
 from utils.repro import seed_worker, set_global_seed
 
 
@@ -143,9 +143,18 @@ def _eval_epoch(
     use_amp: bool,
     criterion,
 ) -> Dict[str, float]:
-    """Aggregated per-image metrics over full loader."""
+    """Aggregated per-image metrics over full loader (bs-weighted)."""
     model.eval()
-    loss_sum, soft_sum, hard_sum, n = 0.0, 0.0, 0.0, 0
+
+    loss_sum = 0.0
+    dice_soft_sum = 0.0
+    dice_hard_sum = 0.0
+    iou_soft_sum = 0.0
+    iou_hard_sum = 0.0
+    prec_sum = 0.0
+    rec_sum = 0.0
+    n = 0
+
     with torch.no_grad():
         for images, masks in loader:
             images = images.to(cfg.device, non_blocking=True)
@@ -155,19 +164,41 @@ def _eval_epoch(
                 logits = model(images)
                 loss = criterion(logits, masks)
 
+            # Safety: should not happen if training is stable, but avoids crashing eval
+            if not torch.isfinite(loss):
+                continue
+
             bs = int(images.shape[0])
             loss_sum += float(loss.detach().cpu()) * bs
-            soft = float(calculate_dice(logits, masks, thr=None))
-            hard = float(calculate_dice(logits, masks, thr=cfg.hard_thr_monitor))
-            soft_sum += soft * bs
-            hard_sum += hard * bs
+
+            # Dice
+            dice_soft = float(calculate_dice(logits, masks, thr=None))
+            dice_hard = float(calculate_dice(logits, masks, thr=cfg.hard_thr_monitor))
+            dice_soft_sum += dice_soft * bs
+            dice_hard_sum += dice_hard * bs
+
+            # IoU
+            iou_soft = float(calculate_iou(logits, masks, thr=None))
+            iou_hard = float(calculate_iou(logits, masks, thr=cfg.hard_thr_monitor))
+            iou_soft_sum += iou_soft * bs
+            iou_hard_sum += iou_hard * bs
+
+            # Precision / Recall (hard threshold)
+            prec, rec = calculate_precision_recall(logits, masks, thr=cfg.hard_thr_monitor)
+            prec_sum += float(prec) * bs
+            rec_sum += float(rec) * bs
+
             n += bs
 
     n = max(1, n)
     return {
         "loss": loss_sum / n,
-        "soft_dice": soft_sum / n,
-        "hard_dice@0.5": hard_sum / n,
+        "soft_dice": dice_soft_sum / n,
+        "hard_dice@0.5": dice_hard_sum / n,
+        "soft_iou": iou_soft_sum / n,
+        "hard_iou@0.5": iou_hard_sum / n,
+        "precision@0.5": prec_sum / n,
+        "recall@0.5": rec_sum / n,
     }
 
 
@@ -248,7 +279,17 @@ def run_one_seed(
                 logits = model(images)
                 loss = criterion(logits, masks)
 
+            # ---- stability guard: do not propagate NaNs/Infs
+            if not torch.isfinite(loss):
+                optimizer.zero_grad(set_to_none=True)
+                continue
+
             scaler.scale(loss).backward()
+
+            # ---- AMP-safe grad clipping
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+
             scaler.step(optimizer)
             scaler.update()
 
@@ -297,6 +338,10 @@ def run_one_seed(
         "test_loss": float(test_metrics["loss"]),
         "test_soft_dice": float(test_metrics["soft_dice"]),
         "test_hard_dice@0.5": float(test_metrics["hard_dice@0.5"]),
+        "test_soft_iou": float(test_metrics["soft_iou"]),
+        "test_hard_iou@0.5": float(test_metrics["hard_iou@0.5"]),
+        "test_precision@0.5": float(test_metrics["precision@0.5"]),
+        "test_recall@0.5": float(test_metrics["recall@0.5"]),
     }
 
 
@@ -332,6 +377,10 @@ def main() -> None:
             "test_loss",
             "test_soft_dice",
             "test_hard_dice@0.5",
+            "test_soft_iou",
+            "test_hard_iou@0.5",
+            "test_precision@0.5",
+            "test_recall@0.5",
             "ckpt_last_path",
         ],
     )
@@ -347,6 +396,10 @@ def main() -> None:
         "metrics_test": {
             "soft_dice": _mean_std([float(r["test_soft_dice"]) for r in rows]),
             "hard_dice@0.5": _mean_std([float(r["test_hard_dice@0.5"]) for r in rows]),
+            "soft_iou": _mean_std([float(r["test_soft_iou"]) for r in rows]),
+            "hard_iou@0.5": _mean_std([float(r["test_hard_iou@0.5"]) for r in rows]),
+            "precision@0.5": _mean_std([float(r["test_precision@0.5"]) for r in rows]),
+            "recall@0.5": _mean_std([float(r["test_recall@0.5"]) for r in rows]),
             "loss": _mean_std([float(r["test_loss"]) for r in rows]),
         },
         "runs": rows,
