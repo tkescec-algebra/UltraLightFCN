@@ -1,0 +1,4 @@
+seed,candidate_id,loss_name,test_loss,test_soft_dice,test_hard_dice@0.5,ckpt_last_path
+13,54,BCEDiceLoss,0.06598945764841231,0.7113457433431022,0.8961963602293909,seg_phase6/final_retrain90/trial_54/seed_13/last.pth
+37,54,BCEDiceLoss,nan,nan,0.19929203562830697,seg_phase6/final_retrain90/trial_54/seed_37/last.pth
+71,54,BCEDiceLoss,0.06544350252214787,0.7123080902236752,0.8996553840046435,seg_phase6/final_retrain90/trial_54/seed_71/last.pth
