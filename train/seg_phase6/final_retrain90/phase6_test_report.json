@@ -1,0 +1,99 @@
+{
+  "phase": 6,
+  "timestamp": "2026-01-25T19:22:22.453196",
+  "data": {
+    "train": "train+valid (90%)",
+    "test": "test",
+    "test_used_during_training": false
+  },
+  "training": {
+    "epochs": 60,
+    "seeds": [
+      13,
+      37,
+      71
+    ],
+    "save": "LAST only"
+  },
+  "winner_source": {
+    "phase5_winner_json": "seg_phase5/topk_retrain/phase5_winner.json",
+    "candidate_id": 54
+  },
+  "init": {
+    "phase3_last_ckpt": "../pretrain/checkpoints/simclr_phase3/phase3_seed13_last.pth"
+  },
+  "metrics_test": {
+    "soft_dice": {
+      "mean": 0.47572649651132853,
+      "std": 0.3363901340918454
+    },
+    "hard_dice@0.5": {
+      "mean": 0.5989523539219634,
+      "std": 0.4235238196785329
+    },
+    "soft_iou": {
+      "mean": 0.45055617920680735,
+      "std": 0.318591835393985
+    },
+    "hard_iou@0.5": {
+      "mean": 0.5782257430040028,
+      "std": 0.40886777293927423
+    },
+    "precision@0.5": {
+      "mean": 0.6195344638121163,
+      "std": 0.4380783654696918
+    },
+    "recall@0.5": {
+      "mean": 0.6190917292668052,
+      "std": 0.43776599765141144
+    },
+    "loss": {
+      "mean": 0.043565233224964424,
+      "std": 0.03080865882042585
+    }
+  },
+  "runs": [
+    {
+      "seed": 13,
+      "candidate_id": 54,
+      "loss_name": "BCEDiceLoss",
+      "ckpt_last_path": "seg_phase6/final_retrain90/trial_54/seed_13/last.pth",
+      "test_loss": 0.06478836077504453,
+      "test_soft_dice": 0.7127478069502168,
+      "test_hard_dice@0.5": 0.8992634267722611,
+      "test_soft_iou": 0.6751389965724892,
+      "test_hard_iou@0.5": 0.8680640234145443,
+      "test_precision@0.5": 0.927972203081688,
+      "test_recall@0.5": 0.9302734773559908
+    },
+    {
+      "seed": 37,
+      "candidate_id": 54,
+      "loss_name": "BCEDiceLoss",
+      "ckpt_last_path": "seg_phase6/final_retrain90/trial_54/seed_37/last.pth",
+      "test_loss": 0.0,
+      "test_soft_dice": 0.0,
+      "test_hard_dice@0.5": 0.0,
+      "test_soft_iou": 0.0,
+      "test_hard_iou@0.5": 0.0,
+      "test_precision@0.5": 0.0,
+      "test_recall@0.5": 0.0
+    },
+    {
+      "seed": 71,
+      "candidate_id": 54,
+      "loss_name": "BCEDiceLoss",
+      "ckpt_last_path": "seg_phase6/final_retrain90/trial_54/seed_71/last.pth",
+      "test_loss": 0.06590733889984873,
+      "test_soft_dice": 0.7144316825837688,
+      "test_hard_dice@0.5": 0.8975936349936291,
+      "test_soft_iou": 0.6765295410479328,
+      "test_hard_iou@0.5": 0.8666132055974639,
+      "test_precision@0.5": 0.930631188354661,
+      "test_recall@0.5": 0.927001710444425
+    }
+  ],
+  "artifacts": {
+    "per_seed_csv": "seg_phase6/final_retrain90/phase6_test_per_seed.csv"
+  }
+}
