@@ -247,15 +247,7 @@ def run_one_seed(
         weight_decay=weight_decay,
     )
 
-    # No VALID in Phase-6; drive ReduceLROnPlateau by train_loss to keep scheduler params consistent.
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode="min",
-        factor=rlop_factor,
-        patience=rlop_patience,
-        threshold=1e-4,
-        min_lr=1e-6,
-    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg.epochs, eta_min=1e-6)
 
     run_dir = os.path.join(cfg.out_root, f"trial_{candidate_id}", f"seed_{seed}")
     os.makedirs(run_dir, exist_ok=True)
@@ -298,7 +290,7 @@ def run_one_seed(
             train_n += bs
 
         train_loss = train_loss_sum / max(1, train_n)
-        scheduler.step(train_loss)
+        scheduler.step()
 
         lr_enc = optimizer.param_groups[0]["lr"]
         lr_dec = optimizer.param_groups[1]["lr"]
