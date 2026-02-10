@@ -2,7 +2,6 @@ data/
 temp/
 dataset/
 suplement/
-test/
 .idea/
 .vscode/
 .venv/

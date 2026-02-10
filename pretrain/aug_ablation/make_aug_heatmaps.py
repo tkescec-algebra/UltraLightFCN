@@ -20,7 +20,7 @@ class HeatmapConfig:
     runs_root: Path = Path("runs/aug_sensitivity")
     plan_json: Path = Path("aug_run_plan.json")
 
-    out_dir_name: str = "_heatmaps"
+    out_dir_name: str = "../heatmaps"
 
     late_frac: float = 0.20
     min_late_points: int = 10

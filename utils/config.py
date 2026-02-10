@@ -34,3 +34,38 @@ ENCODER_PREFIXES: tuple[str, ...] = (
     "mini_aspp",
     "sa",
 )
+
+# -----------------------------
+# Phase-7 plotting (paper-ready)
+# -----------------------------
+PHASE7_MASTER_REPORT = r"bench_phase7/20260201_103832/phase7_master_report.json"
+PHASE7_PLOTS_OUTDIR = r"bench_phase7/overall_plots"
+
+# Paper-safe default: ours + SOTA MINFT only (fullft is optional appendix)
+PHASE7_INCLUDE_FULLFT = False
+
+PHASE7_MODEL_ORDER = [
+    "ultralight_phase6",
+    "dlv3p_resnet50",
+    "dlv3p_mobilenetv2",
+    "unet_resnet34",
+]
+
+PHASE7_MODEL_LABELS = {
+    "ultralight_phase6": "UltraLightFCN (ours)",
+    "dlv3p_resnet50": "DeepLabV3+ R50",
+    "dlv3p_mobilenetv2": "DeepLabV3+ MNetV2",
+    "unet_resnet34": "U-Net R34",
+}
+
+# -----------------------------
+# Phase-7 per-image plots (.npz)
+# -----------------------------
+PHASE7_PER_IMAGE_DIR = r"bench_phase7/20260201_103832/per_image"  # folder gdje su *_per_image.npz (može i root; radi rekurzivno)
+PHASE7_PER_IMAGE_OUTDIR = r"bench_phase7/plots_per_image"
+
+# Tail threshold for "failure rate" plots
+PHASE7_TAIL_DICE_THRESH = 0.10
+
+# How many worst images to export (per model / overall)
+PHASE7_WORST_N = 50

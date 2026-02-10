@@ -188,13 +188,29 @@ class WindowedShiftedSelfAttention(nn.Module):
         if attn_mask is not None:
             attn_mask = attn_mask.repeat(B, 1, 1, 1)  # (B*nW, 1, L, L)
 
-        # Scaled dot-product attention (Flash/SDP kernel under the hood)
-        attn = F.scaled_dot_product_attention(
-            q, k, v,
-            attn_mask=attn_mask,
-            dropout_p=self.attn_drop.p if self.training else 0.0,
-            is_causal=False,
-        )  # (B*nW, heads, L, head_dim)
+        # --- Scaled dot-product attention ---
+        if hasattr(F, "scaled_dot_product_attention"):
+            attn = F.scaled_dot_product_attention(
+                q, k, v,
+                attn_mask=attn_mask,
+                dropout_p=self.attn_drop.p if self.training else 0.0,
+                is_causal=False,
+            ) # (B*nW, heads, L, head_dim)
+        else:
+            # Manual SDP for PyTorch < 2.0 (same math)
+            scale = (self.head_dim) ** -0.5
+            scores = torch.matmul(q, k.transpose(-2, -1)) * scale  # (B*nW, heads, L, L)
+
+            if attn_mask is not None:
+                # attn_mask: (B*nW, 1, L, L) boolean (True = disallow)
+                mask = attn_mask.expand(-1, scores.size(1), -1, -1)
+                scores = scores.masked_fill(mask, float("-inf"))
+
+            probs = torch.softmax(scores, dim=-1)
+            if self.training and self.attn_drop.p > 0:
+                probs = torch.dropout(probs, p=self.attn_drop.p, train=True)
+
+            attn = torch.matmul(probs, v)  # (B*nW, heads, L, head_dim)
 
         # Back to (B*nW, L, C)
         attn = attn.permute(0, 2, 1, 3).contiguous().view(B * nW, L, C)
