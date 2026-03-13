@@ -1,8 +1,16 @@
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
+# -----------------------------------
+# Custom GELU activation (exact formula, no aten::gelu schema issues in TorchScript)
+# -----------------------------------
+class GELUExact(nn.Module):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Exact GELU, avoids aten::gelu schema issues in TorchScript
+        return 0.5 * x * (1.0 + torch.erf(x / math.sqrt(2.0)))
 
 # -----------------------------------
 # 1) Depthwise Separable Convolution
@@ -84,7 +92,7 @@ class WindowedShiftedSelfAttention(nn.Module):
         hidden = int(channels * mlp_ratio)
         self.mlp = nn.Sequential(
             nn.Linear(channels, hidden),
-            nn.GELU() if use_gelu else nn.SiLU(),
+            GELUExact() if use_gelu else nn.SiLU(),
             nn.Dropout(proj_dropout),
             nn.Linear(hidden, channels),
             nn.Dropout(proj_dropout),
@@ -120,7 +128,7 @@ class WindowedShiftedSelfAttention(nn.Module):
         x = x.view(B, H, W, C)
         return x
 
-    def _build_attn_mask(self, Hp, Wp, device):
+    def _build_attn_mask(self, Hp, Wp, ref: torch.Tensor):
         """
         Build a boolean attention mask for shifted windows so tokens
         from different (shifted) windows cannot attend each other.
@@ -130,7 +138,7 @@ class WindowedShiftedSelfAttention(nn.Module):
         if ss == 0:
             return None
 
-        img_mask = torch.zeros((1, 1, Hp, Wp), device=device)  # (1,1,H,W)
+        img_mask = ref.new_zeros((1, 1, Hp, Wp))  # (1,1,H,W)
         cnt = 0
         h_slices = (slice(0, -ws), slice(-ws, -ss), slice(-ss, None))
         w_slices = (slice(0, -ws), slice(-ws, -ss), slice(-ss, None))
@@ -158,8 +166,7 @@ class WindowedShiftedSelfAttention(nn.Module):
         # Pad to multiples of window size
         pad_h = (ws - H % ws) % ws
         pad_w = (ws - W % ws) % ws
-        if pad_h or pad_w:
-            x = F.pad(x, (0, pad_w, 0, pad_h))
+        x = F.pad(x, (0, pad_w, 0, pad_h))
         B, C, Hp, Wp = x.shape
 
         # Cyclic shift (if enabled)
@@ -184,8 +191,9 @@ class WindowedShiftedSelfAttention(nn.Module):
         v = v.view(B * nW, L, self.num_heads, self.head_dim).permute(0, 2, 1, 3)
 
         # Attention mask for shifted windows
-        attn_mask = self._build_attn_mask(Hp, Wp, q.device)
+        attn_mask = self._build_attn_mask(Hp, Wp, win_tokens)
         if attn_mask is not None:
+            attn_mask = attn_mask.to(q.device)
             attn_mask = attn_mask.repeat(B, 1, 1, 1)  # (B*nW, 1, L, L)
 
         # --- Scaled dot-product attention ---
@@ -202,6 +210,7 @@ class WindowedShiftedSelfAttention(nn.Module):
             scores = torch.matmul(q, k.transpose(-2, -1)) * scale  # (B*nW, heads, L, L)
 
             if attn_mask is not None:
+                attn_mask = attn_mask.to(scores.device)
                 # attn_mask: (B*nW, 1, L, L) boolean (True = disallow)
                 mask = attn_mask.expand(-1, scores.size(1), -1, -1)
                 scores = scores.masked_fill(mask, float("-inf"))
@@ -232,8 +241,7 @@ class WindowedShiftedSelfAttention(nn.Module):
             out = torch.roll(out, shifts=(ss, ss), dims=(2, 3))
 
         # Remove padding
-        if pad_h or pad_w:
-            out = out[:, :, :H, :W]
+        out = out[:, :, :H, :W]
 
         return out
 

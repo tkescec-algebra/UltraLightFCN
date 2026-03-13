@@ -146,9 +146,9 @@ def resolve_phase7_paths(master_json_path: Path) -> Tuple[Path, Path, Path]:
     master_dir = master_json_path.parent.resolve()
 
     # Infer project root from location of bench_phase7
-    if master_dir.name == "bench_phase7":
+    if master_dir.name in ("bench_phase7", "bench_phase7_jetson_ts"):
         project_root = master_dir.parent
-    elif master_dir.parent.name == "bench_phase7":
+    elif master_dir.parent.name in ("bench_phase7", "bench_phase7_jetson_ts"):
         project_root = master_dir.parent.parent
     else:
         project_root = master_dir.parent
@@ -156,7 +156,7 @@ def resolve_phase7_paths(master_json_path: Path) -> Tuple[Path, Path, Path]:
     def resolve_one(raw: str) -> Path:
         if _is_abs_path(raw):
             return Path(raw).resolve()
-        if raw.startswith("bench_phase7/") or raw.startswith("bench_phase7\\"):
+        if raw.startswith("bench_phase7/") or raw.startswith("bench_phase7\\") or raw.startswith("bench_phase7_jetson_ts/") or raw.startswith("bench_phase7_jetson_ts\\"):
             return (project_root / raw).resolve()
         return (master_dir / raw).resolve()
 

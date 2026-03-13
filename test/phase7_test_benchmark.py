@@ -112,25 +112,6 @@ CFG_DESKTOP = BenchmarkConfig(
     out_root="bench_phase7",
 )
 
-CFG_JETSON = BenchmarkConfig(
-    roster_paths=(
-        "../train/seg_phase6/final_retrain90/phase6_test_report.json",
-        "../train/seg_sota/stage2_final90_test/phaseSOTA_test_report.json",
-    ),
-    data_root="../dataset",
-    test_split="test",
-    eval_batch=8,
-    num_workers=0,
-    measure_cpu=True,
-    measure_gpu=True,
-    use_amp_timing=False,
-    warmup=30,
-    iters=200,
-    repeats=10,
-    out_root="bench_phase7_jetson",
-)
-
-
 # -------------------------
 # Model roster
 # -------------------------

@@ -1,6 +1,7 @@
 import albumentations as A
 import cv2
 from albumentations.pytorch import ToTensorV2
+from scipy.constants import value
 
 """
 Albumentations transforms for RGB images + binary masks.
@@ -32,6 +33,7 @@ def get_transforms(
             fill_mask=0,
             p=1.0,
         ),
+        # A.Resize(256, 256)
     ]
 
     # --- Geometric transforms (image + mask) ---
