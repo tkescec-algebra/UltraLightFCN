@@ -185,7 +185,7 @@ class WindowedShiftedSelfAttention(nn.Module):
         img_mask[:, :, Hp - ss:Hp, Wp - ss:Wp] = cnt
         cnt += 1
 
-        # Apply the same cyclic shift as features
+        # # Apply the same cyclic shift as features
         img_mask = torch.roll(img_mask, shifts=(-ss, -ss), dims=(2, 3))
 
         # To (B,H,W,C)

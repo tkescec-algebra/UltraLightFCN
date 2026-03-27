@@ -32,9 +32,9 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 # -------------------------
 
 # (1) Input and temporary/output directories
-in_dir    = Path("data")        # Root of original BMPs (images + masks mixed in subfolders)
-temp_dir  = Path("temp")        # Cache for normalized PNGs (images as RGB, masks as {0,1})
-out_root  = Path("dataset")     # Final output (train/valid/test)
+in_dir    = Path("../data")        # Root of original BMPs (images + masks mixed in subfolders)
+temp_dir  = Path("../temp")        # Cache for normalized PNGs (images as RGB, masks as {0,1})
+out_root  = Path("../dataset")     # Final output (train/valid/test)
 
 # (2) Tiling parameters
 tile_size = 256

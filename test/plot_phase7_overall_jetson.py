@@ -1,7 +1,10 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 """
 Phase-7 paper-ready plots (TEST locked; reporting only).
 
-Refactored version of plot_phase7_overall.py.
+Refactored version of plot_phase7_overall_jetson.py.
 
 What it generates (PDF + PNG):
   - composite_score_overall
@@ -11,24 +14,24 @@ What it generates (PDF + PNG):
   - pareto_dice_vs_flops                (only if FLOPs column exists)
   - overview_pareto_2x2                 (only if FLOPs column exists; otherwise last panel is blank)
   - dice_panels_overall_pv01_pv03_pv08
-  - figure4_desktop_main                (main paper figure)
+  - figure5_jetson_main                  (new main paper figure)
   - plot_data_pareto_agg.csv
 
-Config-driven. Reads from utils.config:
+Config-driven (no CLI args). Reads from utils.config:
   - PHASE7_MASTER_REPORT                (required)
   - PHASE7_PLOTS_OUTDIR                 (required)
   - PHASE7_INCLUDE_FULLFT               (optional, default False)
   - PHASE7_MODEL_ORDER                  (optional)
   - PHASE7_MODEL_LABELS                 (optional)
 
-Figure 4 layout:
+Figure 5 layout:
   Row 1: Composite | Overall hard Dice
   Row 2: PV01 | PV03 | PV08 hard Dice
   Row 3: Pareto GPU | Pareto CPU | Pareto Params
   Bottom: One shared Pareto legend
 
 Design choices:
-  - one shared legend for the three Pareto panels in Figure 4
+  - one shared legend for the three Pareto panels in Figure 5
   - log scale only for Params on x-axis
   - linear x-axis for GPU and CPU latency
 """
@@ -50,19 +53,45 @@ import utils.config as config
 
 
 # -----------------------------
-# Parsing model_id
+# Parsing model_id / ckpt_path for Jetson export
 # -----------------------------
 
-def parse_model_parts(model_id: str) -> Tuple[str, str]:
-    """Return (base_model, ft_regime) parsed from benchmark model_id."""
-    if str(model_id).startswith("ultralight_phase6"):
-        return ("ultralight_phase6", "")
-    parts = str(model_id).split("::")
-    base = parts[0] if len(parts) >= 1 else str(model_id)
-    regime = ""
-    if len(parts) >= 2 and parts[1] in ("minft", "fullft"):
-        regime = parts[1]
-    return (base, regime)
+def _normalize_text(s: object) -> str:
+    return str(s).strip().lower().replace("\\", "/")
+
+
+def detect_base_model(model_id: object, ckpt_path: object = "") -> str:
+    text = f"{_normalize_text(model_id)} || {_normalize_text(ckpt_path)}"
+
+    if "dlv3p_resnet50" in text:
+        return "dlv3p_resnet50"
+    if "dlv3p_mobilenetv2" in text:
+        return "dlv3p_mobilenetv2"
+    if "unet_resnet34" in text:
+        return "unet_resnet34"
+
+    if (
+        "ultralightfcn" in text
+        or "seg_phase6" in text
+        or "phase6" in text
+        or "trial_54" in text
+    ):
+        return "ultralight_phase6"
+
+    return _normalize_text(model_id)
+
+
+def detect_ft_regime(model_id: object, ckpt_path: object = "") -> str:
+    text = f"{_normalize_text(model_id)} || {_normalize_text(ckpt_path)}"
+    if "fullft" in text:
+        return "fullft"
+    if "minft" in text:
+        return "minft"
+    return ""
+
+
+def parse_model_parts(model_id: object, ckpt_path: object = "") -> Tuple[str, str]:
+    return detect_base_model(model_id, ckpt_path), detect_ft_regime(model_id, ckpt_path)
 
 
 # -----------------------------
@@ -132,7 +161,6 @@ def _is_abs_path(p: str) -> bool:
 
 
 def resolve_phase7_paths(master_json_path: Path) -> Tuple[Path, Path, Path]:
-    """Resolve CSV artifact paths stored in master_report.json."""
     with master_json_path.open("r", encoding="utf-8") as f:
         master = json.load(f)
 
@@ -145,19 +173,91 @@ def resolve_phase7_paths(master_json_path: Path) -> Tuple[Path, Path, Path]:
 
     if master_dir.name in ("bench_phase7", "bench_phase7_jetson_ts"):
         project_root = master_dir.parent
+        bench_root = master_dir
     elif master_dir.parent.name in ("bench_phase7", "bench_phase7_jetson_ts"):
         project_root = master_dir.parent.parent
+        bench_root = master_dir.parent
     else:
         project_root = master_dir.parent
+        bench_root = master_dir.parent
+
+    def _candidate_paths(raw: str):
+        raw_path = Path(raw)
+        name_only = raw_path.name
+        candidates = []
+
+        if _is_abs_path(raw):
+            candidates.append(Path(raw).resolve())
+            return candidates
+
+        candidates.append((master_dir / name_only).resolve())
+        candidates.append((project_root / raw).resolve())
+        candidates.append((master_dir / raw).resolve())
+
+        raw_posix = raw.replace("\\", "/")
+        for prefix in ("bench_phase7/", "bench_phase7_jetson_ts/"):
+            if raw_posix.startswith(prefix):
+                candidates.append((project_root / raw_posix[len(prefix):]).resolve())
+                candidates.append((bench_root / raw_posix[len(prefix):]).resolve())
+
+        candidates.append((Path("test") / name_only).resolve())
+
+        seen = set()
+        unique = []
+        for c in candidates:
+            s = str(c)
+            if s not in seen:
+                seen.add(s)
+                unique.append(c)
+        return unique
 
     def resolve_one(raw: str) -> Path:
-        if _is_abs_path(raw):
-            return Path(raw).resolve()
-        if raw.startswith("bench_phase7/") or raw.startswith("bench_phase7\\") or raw.startswith("bench_phase7_jetson_ts/") or raw.startswith("bench_phase7_jetson_ts\\"):
-            return (project_root / raw).resolve()
-        return (master_dir / raw).resolve()
+        for cand in _candidate_paths(raw):
+            if cand.exists():
+                return cand
+        return _candidate_paths(raw)[0]
 
     return resolve_one(q_raw), resolve_one(ta_raw), resolve_one(tr_raw)
+
+
+def load_desktop_params_from_phase7(include_fullft: bool) -> pd.DataFrame:
+    desktop_master = Path(getattr(config, "PHASE7_MASTER_REPORT"))
+    if not desktop_master.exists():
+        print(f"[WARN] Desktop PHASE7_MASTER_REPORT not found: {desktop_master}")
+        return pd.DataFrame(columns=["base_model", "ft_regime", "seed", "params_total"])
+
+    _, _, tr_path = resolve_phase7_paths(desktop_master)
+    if not tr_path.exists():
+        print(f"[WARN] Desktop timing_per_repeat_csv not found: {tr_path}")
+        return pd.DataFrame(columns=["base_model", "ft_regime", "seed", "params_total"])
+
+    tr = pd.read_csv(tr_path)
+    tr["ckpt_path"] = tr.get("ckpt_path", "")
+    parts = tr.apply(
+        lambda r: pd.Series(parse_model_parts(r.get("model_id", ""), r.get("ckpt_path", ""))),
+        axis=1,
+    )
+    parts.columns = ["base_model", "ft_regime"]
+    tr[["base_model", "ft_regime"]] = parts
+
+    keep_regimes = {"", "minft", "fullft"} if include_fullft else {"", "minft"}
+    tr = tr[tr["ft_regime"].isin(keep_regimes)].copy()
+
+    tr_cpu_first = (
+        tr[tr["device"] == "cpu"]
+        .sort_values(["base_model", "ft_regime", "seed", "repeat_idx"])
+        .groupby(["base_model", "ft_regime", "seed"], as_index=False)
+        .first()
+    )
+
+    if "params_total" not in tr_cpu_first.columns:
+        print("[WARN] Desktop export has no params_total column")
+        return pd.DataFrame(columns=["base_model", "ft_regime", "seed", "params_total"])
+
+    out = tr_cpu_first[["base_model", "ft_regime", "seed", "params_total"]].copy()
+    out["params_total"] = pd.to_numeric(out["params_total"], errors="coerce")
+    out = out[np.isfinite(out["params_total"]) & (out["params_total"] > 0)].copy()
+    return out
 
 
 # -----------------------------
@@ -203,9 +303,9 @@ class PlotContext:
 # -----------------------------
 
 def load_phase7_tables(settings: PlotSettings) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    master_path = Path(getattr(config, "PHASE7_MASTER_REPORT"))
+    master_path = Path(getattr(config, "PHASE7_MASTER_REPORT_JETSON"))
     if not master_path.exists():
-        raise FileNotFoundError(f"PHASE7_MASTER_REPORT not found: {master_path}")
+        raise FileNotFoundError(f"PHASE7_MASTER_REPORT_JETSON not found: {master_path}")
 
     q_path, ta_path, tr_path = resolve_phase7_paths(master_path)
 
@@ -220,9 +320,17 @@ def load_phase7_tables(settings: PlotSettings) -> Tuple[pd.DataFrame, pd.DataFra
     ta = pd.read_csv(ta_path)
     tr = pd.read_csv(tr_path)
 
-    q[["base_model", "ft_regime"]] = q["model_id"].apply(lambda s: pd.Series(parse_model_parts(s)))
-    ta[["base_model", "ft_regime"]] = ta["model_id"].apply(lambda s: pd.Series(parse_model_parts(s)))
-    tr[["base_model", "ft_regime"]] = tr["model_id"].apply(lambda s: pd.Series(parse_model_parts(s)))
+    q["ckpt_path"] = q.get("ckpt_path", "")
+    ta["ckpt_path"] = ta.get("ckpt_path", "")
+    tr["ckpt_path"] = tr.get("ckpt_path", "")
+
+    for df in (q, ta, tr):
+        parts = df.apply(
+            lambda r: pd.Series(parse_model_parts(r.get("model_id", ""), r.get("ckpt_path", ""))),
+            axis=1,
+        )
+        parts.columns = ["base_model", "ft_regime"]
+        df[["base_model", "ft_regime"]] = parts
 
     keep_regimes = {"", "minft", "fullft"} if settings.include_fullft else {"", "minft"}
     q = q[q["ft_regime"].isin(keep_regimes)].copy()
@@ -245,7 +353,12 @@ def detect_flops_column(tr: pd.DataFrame) -> Optional[str]:
     return next((c for c in flops_candidates if c in tr.columns), None)
 
 
-def aggregate_composite(q: pd.DataFrame, tr: pd.DataFrame, model_order: Sequence[str]) -> Tuple[pd.DataFrame, pd.DataFrame, Optional[str]]:
+def aggregate_composite(
+    q: pd.DataFrame,
+    tr: pd.DataFrame,
+    model_order: Sequence[str],
+    include_fullft: bool,
+) -> Tuple[pd.DataFrame, pd.DataFrame, Optional[str], pd.DataFrame]:
     q_overall = q[q["subset"] == "overall"].copy()
     flops_col = detect_flops_column(tr)
 
@@ -260,8 +373,29 @@ def aggregate_composite(q: pd.DataFrame, tr: pd.DataFrame, model_order: Sequence
     if flops_col is not None:
         keep_cols.append(flops_col)
     tr_params = tr_cpu_first[keep_cols].copy()
+    tr_params["params_total"] = pd.to_numeric(tr_params["params_total"], errors="coerce")
+
+    # Jetson timing exports may miss or corrupt params_total. Fill from desktop Phase-7 report when available.
+    desktop_params = load_desktop_params_from_phase7(include_fullft)
+    if not desktop_params.empty:
+        tr_params = tr_params.merge(
+            desktop_params.rename(columns={"params_total": "params_total_desktop"}),
+            on=["base_model", "ft_regime", "seed"],
+            how="outer",
+        )
+        tr_params["params_total"] = tr_params["params_total"].where(
+            np.isfinite(tr_params["params_total"]) & (tr_params["params_total"] > 0),
+            tr_params["params_total_desktop"],
+        )
+        if flops_col is not None and flops_col not in tr_params.columns:
+            tr_params[flops_col] = np.nan
+        tr_params = tr_params.drop(columns=[c for c in ["params_total_desktop"] if c in tr_params.columns])
+
+    tr_params = tr_params[np.isfinite(tr_params["params_total"]) & (tr_params["params_total"] > 0)].copy()
 
     comp = q_overall.merge(tr_params, on=["base_model", "ft_regime", "seed"], how="left")
+    comp["params_total"] = pd.to_numeric(comp["params_total"], errors="coerce")
+    comp = comp[np.isfinite(comp["params_total"]) & (comp["params_total"] > 0)].copy()
     comp["score"] = comp.apply(lambda r: composite_score(r["dice_mean"], r["params_total"]), axis=1)
 
     comp_agg = (
@@ -367,7 +501,7 @@ def compute_dice_ylim(q: pd.DataFrame) -> Tuple[float, float]:
 
 def build_context(settings: PlotSettings) -> PlotContext:
     q, ta, tr = load_phase7_tables(settings)
-    q_overall, comp_agg, flops_col, tr_params = aggregate_composite(q, tr, settings.model_order)
+    q_overall, comp_agg, flops_col, tr_params = aggregate_composite(q, tr, settings.model_order, settings.include_fullft)
     pareto = aggregate_pareto(q_overall, ta, tr_params, flops_col, settings.model_order)
     entries, color_map, params_by_key, sizes_by_key = build_style_context(pareto)
     dice_ylim = compute_dice_ylim(q)
@@ -476,10 +610,23 @@ def draw_pareto_panel(
     xlog: bool = False,
     show_ylabel: bool = True,
 ) -> None:
+    xvals = pd.to_numeric(ctx.pareto[xcol], errors="coerce")
+    valid = np.isfinite(xvals)
+    if xlog:
+        valid &= xvals > 0
+
+    if not bool(valid.any()):
+        ax.set_axis_off()
+        ax.set_title(f"{title} (missing)")
+        return
+
     for row in ctx.pareto.itertuples(index=False):
+        xv = pd.to_numeric(pd.Series([getattr(row, xcol)]), errors="coerce").iloc[0]
+        if pd.isna(xv) or (xlog and float(xv) <= 0):
+            continue
         key = (row.base_model, row.ft_regime)
         ax.scatter(
-            [getattr(row, xcol)],
+            [float(xv)],
             [row.dice_mean],
             s=[ctx.sizes_by_key[key]],
             color=ctx.color_map.get(key, None),
@@ -593,10 +740,10 @@ def save_dice_panels_2x2(ctx: PlotContext) -> None:
 
 
 # -----------------------------
-# Final Figure 4 export
+# Final Figure 5 export
 # -----------------------------
 
-def save_figure4_desktop_main(ctx: PlotContext) -> None:
+def save_figure5_jetson_main(ctx: PlotContext) -> None:
     fig = plt.figure(figsize=(17, 14))
     gs = GridSpec(
         nrows=4,
@@ -641,7 +788,7 @@ def save_figure4_desktop_main(ctx: PlotContext) -> None:
         ncol=2,
         frameon=True,
         fontsize=10,
-        title="Marker size ∝ params_total)",
+        title="Marker size ∝ params_total",
         title_fontsize=10,
         handletextpad=0.7,
         columnspacing=1.4,
@@ -649,9 +796,9 @@ def save_figure4_desktop_main(ctx: PlotContext) -> None:
         labelspacing=1.2,
     )
 
-    # fig.suptitle("Figure 4. Desktop benchmark: segmentation accuracy and efficiency trade-offs", y=0.992)
+    # fig.suptitle("Figure 5. Edge benchmark on Jetson: segmentation accuracy and efficiency trade-offs", y=0.992)
     fig.subplots_adjust(left=0.045, right=0.985, top=0.94, bottom=0.035)
-    save_fig(fig, ctx.settings.outdir / "figure4_desktop_banchmark", use_tight_layout=False)
+    save_fig(fig, ctx.settings.outdir / "figure5_jetson_benchmark", use_tight_layout=False)
 
 
 # -----------------------------
@@ -668,7 +815,7 @@ def main() -> None:
             ["ultralight_phase6", "dlv3p_resnet50", "dlv3p_mobilenetv2", "unet_resnet34"],
         )),
         model_labels=dict(getattr(config, "PHASE7_MODEL_LABELS", {})),
-        outdir=Path(getattr(config, "PHASE7_PLOTS_OUTDIR")),
+        outdir=Path(getattr(config, "PHASE7_PLOTS_OUTDIR_JETSON")),
     )
 
     ctx = build_context(settings)
@@ -679,13 +826,17 @@ def main() -> None:
     save_single_pareto_plot(ctx, "params_total", "Total parameters (log scale) — mean across seeds", "pareto_dice_vs_params", xlog=True)
 
     if ctx.flops_col is not None and "flops_mean" in ctx.pareto.columns:
-        save_single_pareto_plot(ctx, "flops_mean", "FLOPs (log scale) — mean across seeds", "pareto_dice_vs_flops", xlog=True)
+        flops_vals = pd.to_numeric(ctx.pareto["flops_mean"], errors="coerce")
+        if np.isfinite(flops_vals).any() and (flops_vals > 0).any():
+            save_single_pareto_plot(ctx, "flops_mean", "FLOPs (log scale) — mean across seeds", "pareto_dice_vs_flops", xlog=True)
+        else:
+            print("[WARN] FLOPs/MACs present but non-positive/invalid for log scale -> skipping pareto_dice_vs_flops")
     else:
         print("[WARN] No FLOPs column found in timing_per_repeat_csv. Skipping pareto_dice_vs_flops.")
 
     save_overview_pareto_2x2(ctx)
     save_dice_panels_2x2(ctx)
-    save_figure4_desktop_main(ctx)
+    save_figure5_jetson_main(ctx)
 
     ctx.pareto.to_csv(settings.outdir / "plot_data_pareto_agg.csv", index=False)
     print(f"[OK] Saved plots to: {settings.outdir.resolve()}")

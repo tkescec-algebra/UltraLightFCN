@@ -1,0 +1,9 @@
+wandb/
+.idea/
+.vscode/
+.venv/
+__pycache__/
+logs/
+runs/
+supp_optuna_simclr_outputs/
+UltraLightFCN_study.db

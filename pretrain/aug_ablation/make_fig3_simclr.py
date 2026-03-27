@@ -1,5 +1,5 @@
 """
-make_fig2_simclr.py
+make_fig3_simclr.py
 
 Generates:
   - A) augmentation sensitivity heatmap
@@ -33,7 +33,7 @@ import matplotlib.ticker as mticker
 # Config dataclass (as requested)
 # -----------------------------
 @dataclass(frozen=True)
-class Fig2SimCLRConfig:
+class Fig3SimCLRConfig:
     # Inputs
     heatmap_csv: str = "runs/heatmaps/heatmap_matrix.csv"
     summary_csv: str = "runs/heatmaps/summary_metrics.csv"
@@ -42,14 +42,14 @@ class Fig2SimCLRConfig:
     train_glob: str = "runs/aug_sensitivity/**/train_metrics.csv"
 
     # Outputs
-    outdir: str = "./fig2_simclr_outputs"
+    outdir: str = "./fig3_simclr_outputs"
     dpi: int = 300
 
     # Titles
-    fig2_suptitle: str = "Figure 2. SimCLR pretraining methodology"
+    fig3_suptitle: str = "Figure 2. SimCLR pretraining methodology"
 
 
-CFG = Fig2SimCLRConfig()
+CFG = Fig3SimCLRConfig()
 
 
 # -----------------------------
@@ -383,7 +383,7 @@ def make_figure2_grid(
     })
     dataA = dfA.values.astype(float)
     im = axA.imshow(dataA, aspect="auto")
-    axA.set_title("A) Augmentation sensitivity (Δ vs baseline)")
+    axA.set_title("(a) Augmentation sensitivity (Δ vs baseline)")
     axA.set_yticks(np.arange(dfA.shape[0]))
     axA.set_yticklabels([pretty_label(str(i)) for i in dfA.index])
     axA.set_xticks(np.arange(dfA.shape[1]))
@@ -403,7 +403,7 @@ def make_figure2_grid(
     axB.fill_between(epochs, loss_mean - loss_std, loss_mean + loss_std, alpha=0.2, label="±1 std")
     axB.set_xlabel("Epoch")
     axB.set_ylabel("NT-Xent train loss")
-    axB.set_title("B) Pretraining convergence (loss + LR)")
+    axB.set_title("(b) Pretraining convergence (loss + LR)")
 
     axB2 = axB.twinx()
     axB2.plot(epochs, lr_mean, linestyle="--", label="LR (mean)")
@@ -482,7 +482,7 @@ def make_figure2_grid(
 
     axC.set_xlabel("Alignment (lower is better)")
     axC.set_ylabel("Uniformity (more negative is better)")
-    axC.set_title("C) Alignment–Uniformity (colored by Δ NT-Xent late)")
+    axC.set_title("(c) Alignment–Uniformity (colored by Δ NT-Xent late)")
 
     cbarC = fig.colorbar(sc, ax=axC, fraction=0.046, pad=0.04)
     cbarC.set_label("Δ NT-Xent (late) vs baseline")
@@ -503,7 +503,7 @@ def make_figure2_grid(
     axD.set_yticklabels([pretty_label(x) for x in gD["cfg"].to_numpy()])
     axD.invert_yaxis()
     axD.set_xlabel("Impact score (mean across seeds)")
-    axD.set_title("D) Ablation ranking (impact score)")
+    axD.set_title("(d) Ablation ranking (impact score)")
     axD.errorbar(
         gD["impact_mean"].to_numpy(),
         y,
@@ -512,7 +512,7 @@ def make_figure2_grid(
         capsize=3,
     )
 
-    fig.suptitle(suptitle, y=0.98, fontsize=14)
+    # fig.suptitle(suptitle, y=0.98, fontsize=14)
 
     # Use a slightly larger top margin; keep our spacing (avoid squeezing)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
@@ -522,7 +522,7 @@ def make_figure2_grid(
 # -----------------------------
 # Run
 # -----------------------------
-def run(cfg: Fig2SimCLRConfig) -> None:
+def run(cfg: Fig3SimCLRConfig) -> None:
     outdir = ensure_outdir(cfg.outdir)
 
     heatmap_df = pd.read_csv(cfg.heatmap_csv, index_col=0)
@@ -547,15 +547,15 @@ def run(cfg: Fig2SimCLRConfig) -> None:
     plt.close(figD)
 
     # Combined 2x2 figure
-    fig2 = make_figure2_grid(
+    fig3 = make_figure2_grid(
         heatmap_df=heatmap_df,
         train_metrics=train_metrics,
         summary_df=summary_df,
-        suptitle=cfg.fig2_suptitle,
+        suptitle=cfg.fig3_suptitle,
         scatter_color_col="delta_late_mean_loss",
     )
-    save_fig(fig2, outdir, "Figure2_SimCLR_2x2", dpi=cfg.dpi)
-    plt.close(fig2)
+    save_fig(fig3, outdir, "Figure3_SimCLR", dpi=cfg.dpi)
+    plt.close(fig3)
 
     print("\nDone.")
 

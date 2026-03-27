@@ -41,12 +41,12 @@ ENCODER_PREFIXES: tuple[str, ...] = (
 # -----------------------------
 
 # Desktop paths
-# PHASE7_MASTER_REPORT = r"bench_phase7/20260201_103832/phase7_master_report.json"
-# PHASE7_PLOTS_OUTDIR = r"bench_phase7/overall_plots"
+PHASE7_MASTER_REPORT = r"bench_phase7/20260201_103832/phase7_master_report.json"
+PHASE7_PLOTS_OUTDIR = r"bench_phase7/overall_plots"
 
 # Edge device paths
-PHASE7_MASTER_REPORT = r"bench_phase7_jetson_ts/20260308_103016/phase7_master_report.json"
-PHASE7_PLOTS_OUTDIR = r"bench_phase7_jetson_ts/overall_plots"
+PHASE7_MASTER_REPORT_JETSON = r"bench_phase7_jetson_ts/20260308_103016/phase7_master_report.json"
+PHASE7_PLOTS_OUTDIR_JETSON = r"bench_phase7_jetson_ts/overall_plots"
 
 # Paper-safe default: ours + SOTA MINFT only (fullft is optional appendix)
 PHASE7_INCLUDE_FULLFT = False
@@ -69,12 +69,12 @@ PHASE7_MODEL_LABELS = {
 # Phase-7 per-image plots (.npz)
 # -----------------------------
 # Desktop paths
-# PHASE7_PER_IMAGE_DIR = r"bench_phase7/20260201_103832/per_image"
-# PHASE7_PER_IMAGE_OUTDIR = r"bench_phase7/plots_per_image"
+PHASE7_PER_IMAGE_DIR = r"bench_phase7/20260201_103832/per_image"
+PHASE7_PER_IMAGE_OUTDIR = r"bench_phase7/plots_per_image"
 
 # Edge device paths
-PHASE7_PER_IMAGE_DIR = r"bench_phase7_jetson_ts/20260308_103016/per_image"
-PHASE7_PER_IMAGE_OUTDIR = r"bench_phase7_jetson_ts/plots_per_image"
+PHASE7_PER_IMAGE_DIR_JETSON = r"bench_phase7_jetson_ts/20260308_103016/per_image"
+PHASE7_PER_IMAGE_OUTDIR_JETSON = r"bench_phase7_jetson_ts/plots_per_image"
 
 # Tail threshold for "failure rate" plots
 PHASE7_TAIL_DICE_THRESH = 0.10

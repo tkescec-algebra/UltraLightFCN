@@ -364,7 +364,7 @@ def plot_slice_grid(
         ax = fig.add_subplot(gs[r, c])
         ax.axis("off")
 
-    fig.suptitle(title, y=0.995, fontsize=14)
+    # fig.suptitle(title, y=0.995, fontsize=14)
     fig.tight_layout(rect=[0, 0, 1, 0.98])
     return fig
 
@@ -383,7 +383,7 @@ def make_supp_grid(df: pd.DataFrame, direction: str, cfg: SuppOptunaSimCLRConfig
     axA.plot(x, y, marker="o", linestyle="none", markersize=3.2, alpha=0.7, label="trial value")
     best = np.minimum.accumulate(y) if direction.upper() == "MINIMIZE" else np.maximum.accumulate(y)
     axA.plot(x, best, linewidth=2.0, label="best-so-far")
-    axA.set_title("S2A) Optimization history")
+    axA.set_title("(a) Optimization history")
     axA.set_xlabel("Trial")
     axA.set_ylabel("Objective")
     axA.grid(True, linestyle="--", alpha=0.35)
@@ -421,7 +421,7 @@ def make_supp_grid(df: pd.DataFrame, direction: str, cfg: SuppOptunaSimCLRConfig
     axB.set_yticks(y_pos)
     axB.set_yticklabels(imp_param.index.tolist())
     axB.invert_yaxis()
-    axB.set_title("S2B) Param importance")
+    axB.set_title("(b) Param importance")
     axB.set_xlabel("Permutation importance (sum)")
     axB.grid(True, axis="x", linestyle="--", alpha=0.35)
 
@@ -438,7 +438,7 @@ def make_supp_grid(df: pd.DataFrame, direction: str, cfg: SuppOptunaSimCLRConfig
     axC.grid(True, which="major", linestyle="--", alpha=0.35)
     axC.grid(True, which="minor", linestyle=":", alpha=0.20)
     axC.minorticks_on()
-    axC.set_title("S2C) lr vs temperature (colored by objective)")
+    axC.set_title("(c) lr vs temperature (colored by objective)")
     axC.set_xlabel(lr_name)
     axC.set_ylabel(t_name)
     cbarC = fig.colorbar(sc, ax=axC, fraction=0.046, pad=0.04)
@@ -447,12 +447,12 @@ def make_supp_grid(df: pd.DataFrame, direction: str, cfg: SuppOptunaSimCLRConfig
     # S2D (lightweight in 2x2): objective vs trial index (distribution view)
     axD = fig.add_subplot(gs[1, 1])
     axD.hist(zz, bins=min(30, max(10, len(zz) // 5)))
-    axD.set_title("S2D) Objective distribution")
+    axD.set_title("(d) Objective distribution")
     axD.set_xlabel("Objective value")
     axD.set_ylabel("Count")
     axD.grid(True, linestyle="--", alpha=0.30)
 
-    fig.suptitle(cfg.suptitle, y=0.98, fontsize=14)
+    # fig.suptitle(cfg.suptitle, y=0.98, fontsize=14)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     return fig
 
@@ -487,7 +487,7 @@ def run(cfg: SuppOptunaSimCLRConfig) -> None:
 
     # Combined 2x2 (S2)
     figS2 = make_supp_grid(df, direction, cfg)
-    save_fig(figS2, outdir, "SuppFigS2_Optuna_SimCLR_2x2", dpi=cfg.dpi, save_pdf=True)
+    save_fig(figS2, outdir, "Figure_S2_Optuna_SimCLR", dpi=cfg.dpi, save_pdf=True)
     plt.close(figS2)
 
     print("\nDone.")
