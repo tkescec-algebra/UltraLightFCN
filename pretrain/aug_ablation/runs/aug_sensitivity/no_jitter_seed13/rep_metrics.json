@@ -1,8 +1,0 @@
-{
-  "seed": 13,
-  "alignment": 0.23960642144083977,
-  "uniformity": -3.8106749057769775,
-  "rep_metric_bs": 256,
-  "rep_metric_num_batches": 4,
-  "uniformity_t": 2.0
-}
