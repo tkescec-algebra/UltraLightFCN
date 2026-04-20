@@ -7,9 +7,10 @@ child process. The purpose is robustness on memory-constrained Jetson devices:
   - the failed model is explicitly logged as failed/OOM,
   - successful models are measured exactly as before.
 
-Methodology is unchanged for successful models:
+Methodology is aligned with the desktop TEST benchmark for successful models:
   - same TEST split,
-  - same preprocessing,
+  - same deterministic test-time geometry (LongestMaxSize + centered zero padding),
+  - same normalization,
   - same deterministic quality recompute,
   - same timing procedure,
   - same CSV/JSON reporting schema for successful runs.
@@ -41,7 +42,9 @@ from torch.utils.data import DataLoader, Dataset
 
 
 # --------------------------
-# Desktop-aligned dataset + transforms (no albumentations dependency)
+# Desktop-equivalent TEST dataset + transforms (no albumentations dependency)
+# Matches desktop test geometry:
+#   LongestMaxSize(max_size=image_size) + PadIfNeeded(..., position="center")
 # --------------------------
 
 def _resize_longest_side(arr: np.ndarray, max_size: int, interpolation: int) -> np.ndarray:
@@ -54,13 +57,54 @@ def _resize_longest_side(arr: np.ndarray, max_size: int, interpolation: int) -> 
     return cv2.resize(arr, (new_w, new_h), interpolation=interpolation)
 
 
-def _desktop_test_geo_transform(image: np.ndarray, mask: np.ndarray, image_size: int) -> Tuple[np.ndarray, np.ndarray]:
+def _pad_to_square_center(
+    arr: np.ndarray,
+    target_size: int,
+    *,
+    border_value,
+) -> np.ndarray:
+    h, w = arr.shape[:2]
+
+    if h > target_size or w > target_size:
+        raise RuntimeError(
+            f"Pad requested for array larger than target_size: got {(h, w)} vs {target_size}"
+        )
+
+    pad_h = target_size - h
+    pad_w = target_size - w
+
+    top = pad_h // 2
+    bottom = pad_h - top
+    left = pad_w // 2
+    right = pad_w - left
+
+    return cv2.copyMakeBorder(
+        arr,
+        top,
+        bottom,
+        left,
+        right,
+        borderType=cv2.BORDER_CONSTANT,
+        value=border_value,
+    )
+
+
+def _desktop_test_geo_transform(
+    image: np.ndarray,
+    mask: np.ndarray,
+    image_size: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    # Match desktop test transform:
+    # LongestMaxSize(max_size=image_size) + PadIfNeeded(..., position="center")
     img = _resize_longest_side(image, image_size, cv2.INTER_LINEAR)
     msk = _resize_longest_side(mask, image_size, cv2.INTER_NEAREST)
-    img = cv2.resize(img, (image_size, image_size), interpolation=cv2.INTER_LINEAR)
-    msk = cv2.resize(msk, (image_size, image_size), interpolation=cv2.INTER_NEAREST)
+
+    img = _pad_to_square_center(img, image_size, border_value=(0, 0, 0))
+    msk = _pad_to_square_center(msk, image_size, border_value=0)
+
     if msk.ndim != 2:
         msk = np.squeeze(msk)
+
     msk = (msk > 0.5).astype(np.float32)
     return img, msk
 
