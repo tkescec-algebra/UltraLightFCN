@@ -9,7 +9,7 @@ Phase 4 — Segmentation HPO screening (proxy), aligned with Phase 1–3 methodo
   - Selection metric: avg_last_k of validation *soft Dice* (thr=None). Hard Dice@0.5 is logged only.
   - Fast mode allowed (deterministic=False) but with seeded DataLoaders for reproducible trials.
 
-Notes for paper defensibility (Q1/Q2):
+Note:
   - No TRAIN/VALID/TEST leakage: HPO uses TRAIN and VALID only; TEST is untouched.
   - Encoder architecture is not changed during downstream tuning.
   - Pretrained encoder stack includes mini_aspp + self-attention (loaded and assigned to encoder LR group).

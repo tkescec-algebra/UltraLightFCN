@@ -1,7 +1,7 @@
-import os
+from dataclasses import dataclass
 import random
 from pathlib import Path
-from collections import defaultdict
+from typing import Dict, List
 
 import numpy as np
 from PIL import Image
@@ -9,95 +9,98 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
 
-# =========================================================
-# CONFIG
-# =========================================================
-# Adjust this path to your final dataset root produced by preprocessing.
-# Expected structure:
-# dataset/
-#   train/
-#       images/
-#       masks/
-#   valid/
-#       images/
-#       masks/
-#   test/
-#       images/
-#       masks/
-DATASET_ROOT = Path("../dataset")
+# -----------------------------
+# Config dataclass
+# -----------------------------
+@dataclass(frozen=True)
+class DatasetFigureConfig:
+    dataset_root: Path = Path("../dataset")
+    outdir: Path = Path(".")
+    save_stem: str = "figure_2_dataset_description"
+    dpi: int = 300
+    seed: int = 42
 
-# Number of example tiles per subset in panel (d)
-EXAMPLES_PER_SUBSET = 1
+    # Figure/layout style aligned with make_fig3_simclr
+    figure_size: tuple = (11, 7)
+    title_fontsize: int = 10
+    label_fontsize: int = 10
+    tick_fontsize: int = 10
+    legend_fontsize: int = 9
+    annotation_fontsize: int = 8
+    title_pad: int = 10
+    panel_wspace: float = 0.18
+    panel_hspace: float = 0.32
+    tight_layout_rect: tuple = (0,0,1,1)  # left, bottom, right, top
 
-# Reproducibility
-random.seed(42)
-np.random.seed(42)
+
+CFG = DatasetFigureConfig()
+
+SUBSETS = ["PV01", "PV03", "PV08"]
+SPLITS = ["train", "valid", "test"]
+SUBSET_COLORS: Dict[str, str] = {
+    "PV01": "tab:blue",
+    "PV03": "tab:orange",
+    "PV08": "tab:green",
+}
 
 
-# =========================================================
-# HELPERS
-# =========================================================
+# -----------------------------
+# Helpers
+# -----------------------------
+def ensure_outdir(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def save_fig(fig: plt.Figure, outdir: Path, stem: str, dpi: int = 300) -> None:
+    png_path = outdir / f"{stem}.png"
+    pdf_path = outdir / f"{stem}.pdf"
+    fig.savefig(png_path, dpi=dpi, bbox_inches="tight")
+    fig.savefig(pdf_path, bbox_inches="tight")
+    print(f"[saved] {png_path}")
+    print(f"[saved] {pdf_path}")
+
+
 def load_mask(mask_path: Path) -> np.ndarray:
-    """Load mask as binary numpy array {0,1}."""
+    """Load a mask as a binary numpy array {0, 1}."""
     mask = Image.open(mask_path).convert("L")
     mask_np = np.array(mask)
     return (mask_np > 0).astype(np.uint8)
 
 
-def load_image(img_path: Path) -> np.ndarray:
-    """Load RGB image as numpy array."""
-    img = Image.open(img_path).convert("RGB")
-    return np.array(img)
-
-
 def mask_coverage(mask_np: np.ndarray) -> float:
-    """Fraction of positive pixels in a tile."""
+    """Return the fraction of positive pixels in a mask."""
     return float((mask_np > 0).mean())
 
 
 def get_subset_from_name(filename: str) -> str:
-    """
-    Extract subset label from filename.
-    Works for names containing PV01, PV03, PV08.
-    """
+    """Extract the subset label from a filename."""
     upper = filename.upper()
-    for sub in ["PV01", "PV03", "PV08"]:
-        if sub in upper:
-            return sub
+    for subset in SUBSETS:
+        if subset in upper:
+            return subset
     return "OTHER"
 
 
-def collect_dataset_records(dataset_root: Path):
-    """
-    Scan dataset root and collect records for train/valid/test.
+def thousands_formatter(x, pos):
+    del pos
+    return f"{int(x):,}"
 
-    Expected structure:
-    dataset/
-        train/
-            image1.png
-            image1_label.png
-            image2.png
-            image2_label.png
-        valid/
-            ...
-        test/
-            ...
 
-    Mask files are identified by '_label' before the file extension.
-    """
-    records = []
-    valid_exts = [".png", ".jpg", ".jpeg", ".tif", ".tiff"]
+def collect_dataset_records(dataset_root: Path) -> List[dict]:
+    """Scan the dataset root and collect paired image/mask records."""
+    records: List[dict] = []
+    valid_exts = {".png", ".jpg", ".jpeg", ".tif", ".tiff"}
 
-    for split in ["train", "valid", "test"]:
+    for split in SPLITS:
         split_dir = dataset_root / split
-
         if not split_dir.exists():
-            print(f"[WARNING] Missing split folder: {split_dir}")
+            print(f"[warning] Missing split folder: {split_dir}")
             continue
 
-        all_files = sorted([p for p in split_dir.iterdir() if p.is_file() and p.suffix.lower() in valid_exts])
-
-        # Keep only original images, not masks
+        all_files = sorted(
+            p for p in split_dir.iterdir() if p.is_file() and p.suffix.lower() in valid_exts
+        )
         image_files = [p for p in all_files if "_label" not in p.stem]
 
         for img_path in image_files:
@@ -105,326 +108,293 @@ def collect_dataset_records(dataset_root: Path):
             mask_path = split_dir / mask_name
 
             if not mask_path.exists():
-                print(f"[WARNING] Missing mask for image: {img_path.name}")
+                print(f"[warning] Missing mask for image: {img_path.name}")
                 continue
 
-            subset = get_subset_from_name(img_path.name)
             mask_np = load_mask(mask_path)
-            cov = mask_coverage(mask_np)
+            coverage = mask_coverage(mask_np)
             positive_pixels = int(mask_np.sum())
-            is_pos = (cov >= 0.005) or (positive_pixels >= 64)
+            is_positive = (coverage >= 0.005) or (positive_pixels >= 64)
 
-            records.append({
-                "split": split,
-                "subset": subset,
-                "image_path": img_path,
-                "mask_path": mask_path,
-                "coverage": cov,
-                "is_positive": is_pos
-            })
+            records.append(
+                {
+                    "split": split,
+                    "subset": get_subset_from_name(img_path.name),
+                    "image_path": img_path,
+                    "mask_path": mask_path,
+                    "coverage": coverage,
+                    "is_positive": is_positive,
+                }
+            )
 
     return records
 
 
-def build_overlay(img_np: np.ndarray, mask_np: np.ndarray, alpha: float = 0.35) -> np.ndarray:
-    """
-    Create red overlay for mask on image.
-    """
-    overlay = img_np.copy().astype(np.float32)
-    red_layer = np.zeros_like(overlay)
-    red_layer[..., 0] = 255  # red channel
+def aggregate_dataset_stats(records: List[dict]) -> dict:
+    """Aggregate counts and coverage statistics used by the figure panels."""
+    pos_neg_by_subset = {subset: {"positive": 0, "negative": 0} for subset in SUBSETS}
+    split_counts = {split: {subset: 0 for subset in SUBSETS} for split in SPLITS}
+    coverage_by_subset_pos = {subset: [] for subset in SUBSETS}
 
-    mask_3c = np.stack([mask_np] * 3, axis=-1).astype(bool)
-    overlay[mask_3c] = (1 - alpha) * overlay[mask_3c] + alpha * red_layer[mask_3c]
-    return overlay.astype(np.uint8)
+    for record in records:
+        subset = record["subset"]
+        split = record["split"]
 
-
-def choose_example_records(records, subsets=("PV01", "PV03", "PV08"), n_per_subset=1):
-    """
-    Pick positive examples for panel (d), one per subset by default.
-    Falls back to any example from that subset if no positive exists.
-    """
-    selected = []
-
-    for subset in subsets:
-        subset_records = [r for r in records if r["subset"] == subset]
-        pos_records = [r for r in subset_records if r["is_positive"]]
-
-        if len(pos_records) >= n_per_subset:
-            chosen = random.sample(pos_records, n_per_subset)
-        elif len(pos_records) > 0:
-            chosen = pos_records
-        elif len(subset_records) > 0:
-            chosen = random.sample(subset_records, min(n_per_subset, len(subset_records)))
-        else:
-            chosen = []
-
-        selected.extend(chosen)
-
-    return selected
-
-
-# =========================================================
-# PLOTTING
-# =========================================================
-def plot_figure_2(records, save_base="figure_2_dataset_description"):
-    subsets = ["PV01", "PV03", "PV08"]
-    splits = ["train", "valid", "test"]
-
-    # -------------------------
-    # Aggregations
-    # -------------------------
-    pos_neg_by_subset = {sub: {"positive": 0, "negative": 0} for sub in subsets}
-    split_counts = {split: {sub: 0 for sub in subsets} for split in splits}
-    coverage_by_subset_pos = {sub: [] for sub in subsets}
-
-    for r in records:
-        subset = r["subset"]
-        split = r["split"]
-
-        if subset not in subsets:
-            continue
-        if split not in splits:
+        if subset not in SUBSETS or split not in SPLITS:
             continue
 
-        if r["is_positive"]:
+        if record["is_positive"]:
             pos_neg_by_subset[subset]["positive"] += 1
-            coverage_by_subset_pos[subset].append(r["coverage"] * 100.0)  # percent
+            coverage_by_subset_pos[subset].append(record["coverage"] * 100.0)
         else:
             pos_neg_by_subset[subset]["negative"] += 1
 
         split_counts[split][subset] += 1
 
-    # -------------------------
-    # Figure setup: 2x2 layout
-    # -------------------------
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    ax1, ax2 = axes[0]
-    ax3, ax4 = axes[1]
-
-    def thousands_formatter(x, pos):
-        return f"{int(x):,}"
-
-    yfmt = FuncFormatter(thousands_formatter)
-
-    # =====================================================
-    # (a) Positive / Negative by subset with log y-scale
-    # =====================================================
-    x = np.arange(len(subsets))
-    positives = [pos_neg_by_subset[sub]["positive"] for sub in subsets]
-    negatives = [pos_neg_by_subset[sub]["negative"] for sub in subsets]
-    width = 0.34
-
-    bars1 = ax1.bar(x - width / 2, positives, width=width, label="Positive")
-    bars2 = ax1.bar(x + width / 2, negatives, width=width, label="Negative")
-
-    ax1.set_title("(a) Tile distribution by subset", fontsize=12)
-    ax1.set_xticks(x)
-    ax1.set_xticklabels(subsets, fontsize=10)
-    ax1.set_ylabel("Number of tiles (log scale)", fontsize=10)
-    ax1.set_yscale("log")
-    ax1.grid(axis="y", linestyle="--", alpha=0.35, which="both")
-    ax1.set_axisbelow(True)
-    ax1.legend(frameon=False, loc="upper right", fontsize=9)
-
-    # Optional: define visible limits
-    ax1.set_ylim(10, 30000)
-
-    # Add values above bars
-    for bars in [bars1, bars2]:
-        for bar in bars:
-            h = bar.get_height()
-            ax1.text(
-                bar.get_x() + bar.get_width() / 2,
-                h * 1.08,
-                f"{int(h):,}",
-                ha="center",
-                va="bottom",
-                fontsize=8
-            )
-
-    # =====================================================
-    # (b) Split distribution by subset with log y-scale
-    # =====================================================
-    x2 = np.arange(len(splits))
-    width2 = 0.24
-
-    pv01_vals = [split_counts[sp]["PV01"] for sp in splits]
-    pv03_vals = [split_counts[sp]["PV03"] for sp in splits]
-    pv08_vals = [split_counts[sp]["PV08"] for sp in splits]
-
-    bars_pv01 = ax2.bar(x2 - width2, pv01_vals, width=width2, label="PV01")
-    bars_pv03 = ax2.bar(x2, pv03_vals, width=width2, label="PV03")
-    bars_pv08 = ax2.bar(x2 + width2, pv08_vals, width=width2, label="PV08")
-
-    ax2.set_title("(b) Split distribution", fontsize=12)
-    ax2.set_xticks(x2)
-    ax2.set_xticklabels(splits, fontsize=10)
-    ax2.set_ylabel("Number of tiles (log scale)", fontsize=10)
-    ax2.set_yscale("log")
-    ax2.grid(axis="y", linestyle="--", alpha=0.35, which="both")
-    ax2.set_axisbelow(True)
-    ax2.legend(frameon=False, loc="upper right", fontsize=9)
-
-    # Optional limits; adjust if needed after rendering
-    ax2.set_ylim(10, 30000)
-
-    # Add values above bars
-    for bars in [bars_pv01, bars_pv03, bars_pv08]:
-        for bar in bars:
-            h = bar.get_height()
-            ax2.text(
-                bar.get_x() + bar.get_width() / 2,
-                h * 1.08,
-                f"{int(h):,}",
-                ha="center",
-                va="bottom",
-                fontsize=8
-            )
-
-    # =====================================================
-    # (c) Mask coverage distribution (positive tiles only)
-    # =====================================================
-    bins = np.linspace(0, 100, 21)  # 20 bins, in percent
-
-    # Drawing order chosen for better visibility in the histogram
-    subsets_c = ["PV03", "PV08", "PV01"]
-
-    # Consistent colors by subset
-    subset_colors = {
-        "PV01": "tab:blue",
-        "PV03": "tab:orange",
-        "PV08": "tab:green",
+    return {
+        "pos_neg_by_subset": pos_neg_by_subset,
+        "split_counts": split_counts,
+        "coverage_by_subset_pos": coverage_by_subset_pos,
     }
 
+
+def style_axis(ax: plt.Axes, cfg: DatasetFigureConfig, *, y_grid_only: bool = True, which: str = "major") -> None:
+    """Apply a consistent visual style to an axis."""
+    if y_grid_only:
+        ax.grid(axis="y", linestyle="--", alpha=0.35, which=which)
+    else:
+        ax.grid(True, linestyle="--", alpha=0.35, which=which)
+    ax.set_axisbelow(True)
+    ax.tick_params(axis="both", labelsize=cfg.tick_fontsize)
+
+
+def add_bar_labels(ax: plt.Axes, bar_groups: List, cfg: DatasetFigureConfig, scale: float = 1.08) -> None:
+    """Add numeric labels above bar containers."""
+    for bars in bar_groups:
+        for bar in bars:
+            height = bar.get_height()
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                height * scale,
+                f"{int(height):,}",
+                ha="center",
+                va="bottom",
+                fontsize=cfg.annotation_fontsize,
+            )
+
+
+# -----------------------------
+# Panel builders
+# -----------------------------
+def plot_panel_a_tile_distribution(ax: plt.Axes, stats: dict, cfg: DatasetFigureConfig) -> None:
+    x = np.arange(len(SUBSETS))
+    width = 0.34
+    positives = [stats["pos_neg_by_subset"][subset]["positive"] for subset in SUBSETS]
+    negatives = [stats["pos_neg_by_subset"][subset]["negative"] for subset in SUBSETS]
+
+    bars_pos = ax.bar(x - width / 2, positives, width=width, label="Positive")
+    bars_neg = ax.bar(x + width / 2, negatives, width=width, label="Negative")
+
+    ax.set_title(
+        "(a) Tile distribution by subset",
+        fontsize=cfg.title_fontsize,
+        pad=cfg.title_pad,
+        fontweight="bold",
+    )
+    ax.set_xticks(x)
+    ax.set_xticklabels(SUBSETS)
+    ax.set_ylabel("Number of tiles (log scale)", fontsize=cfg.label_fontsize)
+    ax.set_yscale("log")
+    ax.set_ylim(10, 30000)
+    style_axis(ax, cfg, which="both")
+    ax.legend(frameon=False, loc="upper right", fontsize=cfg.legend_fontsize)
+    add_bar_labels(ax, [bars_pos, bars_neg], cfg)
+
+
+def plot_panel_b_split_distribution(ax: plt.Axes, stats: dict, cfg: DatasetFigureConfig) -> None:
+    x = np.arange(len(SPLITS))
+    width = 0.24
+    pv01_vals = [stats["split_counts"][split]["PV01"] for split in SPLITS]
+    pv03_vals = [stats["split_counts"][split]["PV03"] for split in SPLITS]
+    pv08_vals = [stats["split_counts"][split]["PV08"] for split in SPLITS]
+
+    bars_pv01 = ax.bar(x - width, pv01_vals, width=width, label="PV01")
+    bars_pv03 = ax.bar(x, pv03_vals, width=width, label="PV03")
+    bars_pv08 = ax.bar(x + width, pv08_vals, width=width, label="PV08")
+
+    ax.set_title(
+        "(b) Split distribution",
+        fontsize=cfg.title_fontsize,
+        pad=cfg.title_pad,
+        fontweight="bold",
+    )
+    ax.set_xticks(x)
+    ax.set_xticklabels(SPLITS)
+    ax.set_ylabel("Number of tiles (log scale)", fontsize=cfg.label_fontsize)
+    ax.set_yscale("log")
+    ax.set_ylim(10, 30000)
+    style_axis(ax, cfg, which="both")
+    ax.legend(frameon=False, loc="upper right", fontsize=cfg.legend_fontsize)
+    add_bar_labels(ax, [bars_pv01, bars_pv03, bars_pv08], cfg)
+
+
+def plot_panel_c_mask_histogram(ax: plt.Axes, stats: dict, cfg: DatasetFigureConfig) -> None:
+    bins = np.linspace(0, 100, 21)
+    yfmt = FuncFormatter(thousands_formatter)
+    subsets_draw_order = ["PV03", "PV08", "PV01"]
     mean_values = {}
 
-    # Draw histograms
-    for sub in subsets_c:
-        vals = coverage_by_subset_pos[sub]
-        if len(vals) > 0:
-            ax3.hist(
-                vals,
+    for subset in subsets_draw_order:
+        values = stats["coverage_by_subset_pos"][subset]
+        if values:
+            ax.hist(
+                values,
                 bins=bins,
                 alpha=0.95,
-                color=subset_colors[sub],
-                label=sub
+                color=SUBSET_COLORS[subset],
+                label=subset,
             )
-            mean_values[sub] = float(np.mean(vals))
+            mean_values[subset] = float(np.mean(values))
 
-    # Draw mean lines using the same color as the corresponding subset
-    for sub in subsets_c:
-        if sub in mean_values:
-            ax3.axvline(
-                mean_values[sub],
+    for subset in subsets_draw_order:
+        if subset in mean_values:
+            ax.axvline(
+                mean_values[subset],
                 linestyle="--",
                 linewidth=1.8,
-                color=subset_colors[sub],
-                label=f"{sub} mean: {mean_values[sub]:.1f}%"
+                color=SUBSET_COLORS[subset],
+                label=f"{subset} mean: {mean_values[subset]:.1f}%",
             )
 
-    ax3.set_title("(c) Mask coverage distribution (positive tiles only)", fontsize=12)
-    ax3.set_xlabel("Mask coverage (%)", fontsize=10)
-    ax3.set_ylabel("Number of tiles", fontsize=10)
-    ax3.grid(axis="y", linestyle="--", alpha=0.95)
-    ax3.set_axisbelow(True)
-    ax3.set_xlim(0, 100)
-    ax3.yaxis.set_major_formatter(yfmt)
+    ax.set_title(
+        "(c) Mask coverage distribution (positive tiles only)",
+        fontsize=cfg.title_fontsize,
+        pad=cfg.title_pad,
+        fontweight="bold",
+    )
+    ax.set_xlabel("Mask coverage (%)", fontsize=cfg.label_fontsize)
+    ax.set_ylabel("Number of tiles", fontsize=cfg.label_fontsize)
+    ax.set_xlim(0, 100)
+    ax.yaxis.set_major_formatter(yfmt)
+    style_axis(ax, cfg)
 
-    # Reorder legend independently from drawing order
-    handles, labels = ax3.get_legend_handles_labels()
-
+    handles, labels = ax.get_legend_handles_labels()
     desired_order = [
         "PV01",
         "PV03",
         "PV08",
-        f"PV01 mean: {mean_values['PV01']:.1f}%",
-        f"PV03 mean: {mean_values['PV03']:.1f}%",
-        f"PV08 mean: {mean_values['PV08']:.1f}%"
+        *(f"{subset} mean: {mean_values[subset]:.1f}%" for subset in SUBSETS if subset in mean_values),
     ]
 
     ordered_handles = []
     ordered_labels = []
-
     for target_label in desired_order:
-        for h, l in zip(handles, labels):
-            if l == target_label:
-                ordered_handles.append(h)
-                ordered_labels.append(l)
+        for handle, label in zip(handles, labels):
+            if label == target_label:
+                ordered_handles.append(handle)
+                ordered_labels.append(label)
                 break
 
-    ax3.legend(ordered_handles, ordered_labels, frameon=False, fontsize=8)
-
-    # =====================================================
-    # (d) Boxplot of mask coverage by subset (positive tiles only)
-    # =====================================================
-    boxplot_data = [coverage_by_subset_pos[sub] for sub in subsets]
-
-    bp = ax4.boxplot(
-        boxplot_data,
-        labels=subsets,
-        patch_artist=False,
-        showfliers=False
+    ax.legend(
+        ordered_handles,
+        ordered_labels,
+        frameon=False,
+        fontsize=cfg.annotation_fontsize,
+        bbox_to_anchor=(0.95, 0.98)
     )
 
-    # Mean markers
-    means = [
-        np.mean(coverage_by_subset_pos[sub]) if len(coverage_by_subset_pos[sub]) > 0 else np.nan
-        for sub in subsets
-    ]
-    ax4.plot([1, 2, 3], means, marker="o", linestyle="None", label="Mean")
+def plot_panel_d_mask_boxplot(ax: plt.Axes, stats: dict, cfg: DatasetFigureConfig) -> None:
+    boxplot_data = [stats["coverage_by_subset_pos"][subset] for subset in SUBSETS]
+    means = [np.mean(values) if values else np.nan for values in boxplot_data]
 
-    ax4.set_title("(d) Mask coverage by subset (positive tiles only)", fontsize=12)
-    ax4.set_xlabel("Subset", fontsize=10)
-    ax4.set_ylabel("Mask coverage (%)", fontsize=10)
-    ax4.set_ylim(0, 100)
-    ax4.grid(axis="y", linestyle="--", alpha=0.35)
-    ax4.set_axisbelow(True)
-    ax4.legend(frameon=False, fontsize=9)
+    ax.boxplot(
+        boxplot_data,
+        labels=SUBSETS,
+        patch_artist=False,
+        showfliers=False,
+    )
+    ax.plot([1, 2, 3], means, marker="o", linestyle="None", label="Mean")
 
-    # -------------------------
-    # Final layout and saving
-    # -------------------------
-    # fig.suptitle("Figure 2. Dataset description", fontsize=15, y=0.98)
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    ax.set_title(
+        "(d) Mask coverage by subset (positive tiles only)",
+        fontsize=cfg.title_fontsize,
+        pad=cfg.title_pad,
+        fontweight="bold",
+    )
+    ax.set_xlabel("Subset", fontsize=cfg.label_fontsize)
+    ax.set_ylabel("Mask coverage (%)", fontsize=cfg.label_fontsize)
+    ax.set_ylim(0, 100)
+    style_axis(ax, cfg)
+    ax.legend(frameon=False, fontsize=cfg.legend_fontsize)
 
-    png_path = f"{save_base}.png"
-    pdf_path = f"{save_base}.pdf"
 
-    plt.savefig(png_path, dpi=300, bbox_inches="tight")
-    plt.savefig(pdf_path, bbox_inches="tight")
-    plt.show()
+# -----------------------------
+# Combined figure
+# -----------------------------
+def make_figure_2_grid(records: List[dict], cfg: DatasetFigureConfig) -> plt.Figure:
+    stats = aggregate_dataset_stats(records)
 
-    print(f"[INFO] Figure saved to: {png_path}")
-    print(f"[INFO] Figure saved to: {pdf_path}")
+    fig = plt.figure(figsize=cfg.figure_size)
+    gs = fig.add_gridspec(2, 2, wspace=cfg.panel_wspace, hspace=cfg.panel_hspace)
 
-# =========================================================
-# OPTIONAL: PRINT NUMERICAL SUMMARY
-# =========================================================
-def print_summary(records):
-    subsets = ["PV01", "PV03", "PV08"]
-    splits = ["train", "valid", "test"]
+    ax_a = fig.add_subplot(gs[0, 0])
+    ax_b = fig.add_subplot(gs[0, 1])
+    ax_c = fig.add_subplot(gs[1, 0])
+    ax_d = fig.add_subplot(gs[1, 1])
 
+    plot_panel_a_tile_distribution(ax_a, stats, cfg)
+    plot_panel_b_split_distribution(ax_b, stats, cfg)
+    plot_panel_c_mask_histogram(ax_c, stats, cfg)
+    plot_panel_d_mask_boxplot(ax_d, stats, cfg)
+
+    # fig.tight_layout(rect=cfg.tight_layout_rect)
+    fig.subplots_adjust(left=0.07, right=0.99, bottom=0.08, top=0.94,
+                        wspace=0.22, hspace=0.28)
+    return fig
+
+
+# -----------------------------
+# Summary
+# -----------------------------
+def print_summary(records: List[dict]) -> None:
     print("\n=== DATASET SUMMARY ===")
     print(f"Total tiles: {len(records)}")
 
-    for sub in subsets:
-        sub_records = [r for r in records if r["subset"] == sub]
-        pos = sum(r["is_positive"] for r in sub_records)
-        neg = len(sub_records) - pos
-        mean_cov = np.mean([r["coverage"] for r in sub_records]) if sub_records else 0.0
-        print(f"{sub}: total={len(sub_records)}, positive={pos}, negative={neg}, mean_coverage={mean_cov:.4f}")
+    for subset in SUBSETS:
+        subset_records = [record for record in records if record["subset"] == subset]
+        positives = sum(record["is_positive"] for record in subset_records)
+        negatives = len(subset_records) - positives
+        mean_coverage = np.mean([record["coverage"] for record in subset_records]) if subset_records else 0.0
+        print(
+            f"{subset}: total={len(subset_records)}, positive={positives}, "
+            f"negative={negatives}, mean_coverage={mean_coverage:.4f}"
+        )
 
     print("\n=== SPLIT SUMMARY ===")
-    for split in splits:
-        split_records = [r for r in records if r["split"] == split]
+    for split in SPLITS:
+        split_records = [record for record in records if record["split"] == split]
         print(f"{split}: {len(split_records)} tiles")
 
 
-# =========================================================
-# MAIN
-# =========================================================
-if __name__ == "__main__":
-    records = collect_dataset_records(DATASET_ROOT)
+# -----------------------------
+# Run
+# -----------------------------
+def run(cfg: DatasetFigureConfig) -> None:
+    random.seed(cfg.seed)
+    np.random.seed(cfg.seed)
+
+    outdir = ensure_outdir(cfg.outdir)
+    records = collect_dataset_records(cfg.dataset_root)
+
     print_summary(records)
-    plot_figure_2(records, save_base="figure_2_dataset_description")
+
+    fig = make_figure_2_grid(records, cfg)
+    save_fig(fig, outdir, cfg.save_stem, dpi=cfg.dpi)
+    plt.show()
+    plt.close(fig)
+
+    print("\nDone.")
+
+
+if __name__ == "__main__":
+    run(CFG)

@@ -57,13 +57,13 @@ CFG = Fig3SimCLRConfig()
 # -----------------------------
 LABEL_MAP: Dict[str, str] = {
     "baseline": "baseline",
-    "no_crop": "crop OFF",
-    "no_jitter": "jitter OFF",
-    "no_rotation": "rotation OFF",
-    "no_gray": "grayscale OFF",
-    "no_blur": "blur OFF",
-    "no_vflip": "vflip OFF",
-    "no_hflip": "hflip OFF",
+    "no_crop": "crop",
+    "no_jitter": "jitter",
+    "no_rotation": "rotation",
+    "no_gray": "grayscale",
+    "no_blur": "blur",
+    "no_vflip": "vflip",
+    "no_hflip": "hflip",
 }
 
 
@@ -369,7 +369,7 @@ def make_figure2_grid(
             f"Available columns: {list(summary_df.columns)}"
         )
 
-    fig = plt.figure(figsize=(14, 9))
+    fig = plt.figure(figsize=(11, 7))
 
     # More space between plots (as requested)
     gs = fig.add_gridspec(2, 2, wspace=0.45, hspace=0.50)
@@ -383,7 +383,7 @@ def make_figure2_grid(
     })
     dataA = dfA.values.astype(float)
     im = axA.imshow(dataA, aspect="auto")
-    axA.set_title("(a) Augmentation sensitivity (Δ vs baseline)")
+    axA.set_title("(a) Augmentation sensitivity (Δ vs baseline)", fontsize=10, pad=10, fontweight="bold")
     axA.set_yticks(np.arange(dfA.shape[0]))
     axA.set_yticklabels([pretty_label(str(i)) for i in dfA.index])
     axA.set_xticks(np.arange(dfA.shape[1]))
@@ -403,7 +403,7 @@ def make_figure2_grid(
     axB.fill_between(epochs, loss_mean - loss_std, loss_mean + loss_std, alpha=0.2, label="±1 std")
     axB.set_xlabel("Epoch")
     axB.set_ylabel("NT-Xent train loss")
-    axB.set_title("(b) Pretraining convergence (loss + LR)")
+    axB.set_title("(b) Pretraining convergence (loss + LR)", fontsize=10, pad=10, fontweight="bold")
 
     axB2 = axB.twinx()
     axB2.plot(epochs, lr_mean, linestyle="--", label="LR (mean)")
@@ -482,7 +482,7 @@ def make_figure2_grid(
 
     axC.set_xlabel("Alignment (lower is better)")
     axC.set_ylabel("Uniformity (more negative is better)")
-    axC.set_title("(c) Alignment–Uniformity (colored by Δ NT-Xent late)")
+    axC.set_title("(c) Alignment–Uniformity (colored by Δ NT-Xent late)", fontsize=10, pad=10, fontweight="bold")
 
     cbarC = fig.colorbar(sc, ax=axC, fraction=0.046, pad=0.04)
     cbarC.set_label("Δ NT-Xent (late) vs baseline")
@@ -503,7 +503,7 @@ def make_figure2_grid(
     axD.set_yticklabels([pretty_label(x) for x in gD["cfg"].to_numpy()])
     axD.invert_yaxis()
     axD.set_xlabel("Impact score (mean across seeds)")
-    axD.set_title("(d) Ablation ranking (impact score)")
+    axD.set_title("(d) Ablation ranking (impact score)", fontsize=10, pad=10, fontweight="bold")
     axD.errorbar(
         gD["impact_mean"].to_numpy(),
         y,

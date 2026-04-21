@@ -43,7 +43,7 @@ from utils.helpers import steps_per_epoch
 from utils.loss_functions import NTXentLoss
 from utils.repro import set_global_seed, seed_worker
 from utils.metrics_simclr import simclr_alignment, simclr_uniformity
-from pretrain.utils.transforms import get_simclr_transforms
+from pretrain.utils.simclr_transforms import get_simclr_transforms
 
 # SimCLR model components
 from models.UltraLightFCN_SimCLR import UltraLightEncoder, ProjectionHead, SimCLRModel

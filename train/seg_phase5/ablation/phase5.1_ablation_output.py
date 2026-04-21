@@ -220,7 +220,7 @@ ax_bottom.plot((1 - d, 1 + d), (1 - d, 1 + d), **kwargs)
 ax_bottom.set_xticks(range(len(variant_order)))
 ax_bottom.set_xticklabels([pretty_variant_name(v) for v in variant_order], rotation=0)
 
-ax_top.set_title("Best and final validation hard@0.5 scores")
+# ax_top.set_title("Best and final validation hard@0.5 scores")
 ax_bottom.set_xlabel("Encoder variant")
 fig.supylabel("Validation hard@0.5 score")
 

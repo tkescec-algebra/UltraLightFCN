@@ -121,6 +121,25 @@ def _pick_param(df: pd.DataFrame, candidates: List[str]) -> str:
     raise ValueError(f"None of the candidate params found: {candidates}. Available: {list(df.columns)}")
 
 
+PRETTY_PARAM_LABELS = {
+    "simclr_lr": "Learning rate",
+    "lr": "Learning rate",
+    "learning_rate": "Learning rate",
+    "simclr_temperature": "Temperature",
+    "temperature": "Temperature",
+    "temp": "Temperature",
+    "max_grad_norm": "Grad. clipping",
+    "weight_decay": "Weight decay",
+    "warmup_ratio": "Warm-up",
+    "proj_out_dim": "Proj. output dim.",
+    "proj_hidden_dim": "Proj. hidden dim.",
+}
+
+
+def pretty_param_name(param_name: str) -> str:
+    return PRETTY_PARAM_LABELS.get(param_name, param_name.replace("_", " ").strip().title())
+
+
 # -----------------------------
 # Load data from Optuna SQLite
 # -----------------------------
@@ -224,7 +243,7 @@ def plot_optimization_history(df: pd.DataFrame, direction: str, title: str = "S2
 def plot_param_importance(
     df: pd.DataFrame,
     cfg: SuppOptunaSimCLRConfig,
-    title: str = "S2B) Hyperparameter importance (permutation)"
+    title: str = "S2B) Hyperparameter importance"
 ) -> plt.Figure:
     y = df["value"].to_numpy(dtype=float)
     feature_cols = [c for c in df.columns if c not in {"trial_id", "number", "value"}]
@@ -265,7 +284,7 @@ def plot_param_importance(
 
     ax.barh(y_pos, imp_param.values)
     ax.set_yticks(y_pos)
-    ax.set_yticklabels(imp_param.index.tolist())
+    ax.set_yticklabels([pretty_param_name(x) for x in imp_param.index.tolist()])
     ax.invert_yaxis()
 
     ax.grid(True, axis="x", linestyle="--", alpha=0.35)
@@ -282,7 +301,7 @@ def plot_param_importance(
 def plot_keyparam_scatter(
     df: pd.DataFrame,
     direction: str,
-    title: str = "S2C) Key-parameter landscape (colored by objective)"
+    title: str = "S2C) Learning rate and contrastive temperature landscape"
 ) -> plt.Figure:
     lr_name = _pick_param(df, ["simclr_lr", "lr", "learning_rate"])
     t_name = _pick_param(df, ["simclr_temperature", "temperature", "temp"])
@@ -299,8 +318,8 @@ def plot_keyparam_scatter(
     ax.grid(True, which="minor", linestyle=":", alpha=0.20)
     ax.minorticks_on()
 
-    ax.set_xlabel(lr_name)
-    ax.set_ylabel(t_name)
+    ax.set_xlabel(pretty_param_name(lr_name))
+    ax.set_ylabel(pretty_param_name(t_name))
     ax.set_title(title)
 
     cbar = fig.colorbar(sc, ax=ax)
@@ -319,7 +338,7 @@ def plot_keyparam_scatter(
 # -----------------------------
 def plot_slice_grid(
     df: pd.DataFrame,
-    title: str = "S2D) Slice plots (objective vs hyperparameters)"
+    title: str = "S2D) Objective value across tuned hyperparameters"
 ) -> plt.Figure:
     param_cols = [c for c in df.columns if c not in {"trial_id", "number", "value"}]
     n = len(param_cols)
@@ -345,9 +364,10 @@ def plot_slice_grid(
         # Rasterize scatter points (greatly reduces PDF complexity/crash risk)
         ax.scatter(x.to_numpy(), y, s=18, alpha=0.7, rasterized=True)
 
-        ax.set_title(p)
+        pretty_p = pretty_param_name(p)
+        ax.set_title(pretty_p)
         ax.set_ylabel("Objective" if c == 0 else "")
-        ax.set_xlabel(p)
+        ax.set_xlabel(pretty_p)
 
         ax.grid(True, which="major", linestyle="--", alpha=0.30)
         ax.minorticks_on()
@@ -383,7 +403,7 @@ def make_supp_grid(df: pd.DataFrame, direction: str, cfg: SuppOptunaSimCLRConfig
     axA.plot(x, y, marker="o", linestyle="none", markersize=3.2, alpha=0.7, label="trial value")
     best = np.minimum.accumulate(y) if direction.upper() == "MINIMIZE" else np.maximum.accumulate(y)
     axA.plot(x, best, linewidth=2.0, label="best-so-far")
-    axA.set_title("(a) Optimization history")
+    axA.set_title("(a) Optimization history", fontsize=10, pad=10, fontweight="bold")
     axA.set_xlabel("Trial")
     axA.set_ylabel("Objective")
     axA.grid(True, linestyle="--", alpha=0.35)
@@ -419,9 +439,9 @@ def make_supp_grid(df: pd.DataFrame, direction: str, cfg: SuppOptunaSimCLRConfig
     y_pos = np.arange(len(imp_param))
     axB.barh(y_pos, imp_param.values)
     axB.set_yticks(y_pos)
-    axB.set_yticklabels(imp_param.index.tolist())
+    axB.set_yticklabels([pretty_param_name(x) for x in imp_param.index.tolist()])
     axB.invert_yaxis()
-    axB.set_title("(b) Param importance")
+    axB.set_title("(b) Hyperparameter importance", fontsize=10, pad=10, fontweight="bold")
     axB.set_xlabel("Permutation importance (sum)")
     axB.grid(True, axis="x", linestyle="--", alpha=0.35)
 
@@ -438,16 +458,16 @@ def make_supp_grid(df: pd.DataFrame, direction: str, cfg: SuppOptunaSimCLRConfig
     axC.grid(True, which="major", linestyle="--", alpha=0.35)
     axC.grid(True, which="minor", linestyle=":", alpha=0.20)
     axC.minorticks_on()
-    axC.set_title("(c) lr vs temperature (colored by objective)")
-    axC.set_xlabel(lr_name)
-    axC.set_ylabel(t_name)
+    axC.set_title("(c) Learning rate vs contrastive temperature", fontsize=10, pad=10, fontweight="bold")
+    axC.set_xlabel(pretty_param_name(lr_name))
+    axC.set_ylabel(pretty_param_name(t_name))
     cbarC = fig.colorbar(sc, ax=axC, fraction=0.046, pad=0.04)
     cbarC.set_label("Objective")
 
     # S2D (lightweight in 2x2): objective vs trial index (distribution view)
     axD = fig.add_subplot(gs[1, 1])
     axD.hist(zz, bins=min(30, max(10, len(zz) // 5)))
-    axD.set_title("(d) Objective distribution")
+    axD.set_title("(d) Objective distribution", fontsize=10, pad=10, fontweight="bold")
     axD.set_xlabel("Objective value")
     axD.set_ylabel("Count")
     axD.grid(True, linestyle="--", alpha=0.30)

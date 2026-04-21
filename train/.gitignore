@@ -8,6 +8,7 @@ seg_phase5/ablation/ablation1_pretrained_freeze/
 seg_phase5/ablation/ablation2_scratch_finetune/
 seg_phase5/ablation/ablation_figures/
 seg_phase5/topk_retrain/
+seg_phase5/plots/
 seg_phase6/final_retrain90/
 seg_sota/stage1_dev80/
 seg_sota/stage2_final90_test

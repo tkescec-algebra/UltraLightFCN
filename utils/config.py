@@ -59,9 +59,9 @@ PHASE7_MODEL_ORDER = [
 ]
 
 PHASE7_MODEL_LABELS = {
-    "ultralight_phase6": "UltraLightFCN (ours)",
-    "dlv3p_resnet50": "DeepLabV3+ R50",
-    "dlv3p_mobilenetv2": "DeepLabV3+ MNetV2",
+    "ultralight_phase6": "ULFCN (ours)",
+    "dlv3p_resnet50": "DLV3+ R50",
+    "dlv3p_mobilenetv2": "DLV3+ MNetV2",
     "unet_resnet34": "U-Net R34",
 }
 
