@@ -1,6 +1,6 @@
 """phase6_seg_final_retrain90_test.py
 
-Phase 6 — Final retrain of Phase-5 winner on TRAIN+VALID (90%), 60 epochs, 3 seeds.
+Phase 6 — Final retrain of Phase-5 winner on TRAIN+VALID (90%), 60 epochs, 10 seeds (13, 37, 71, 101, 131, 151, 181, 211, 241, 271).
 - No checkpoint selection: save LAST only.
 - No TEST usage during training.
 - After training finishes: evaluate ONCE on TEST and report mean±std across seeds.
@@ -13,8 +13,11 @@ Notes:
 
 from __future__ import annotations
 
+import argparse
+import csv
 import os
-from dataclasses import dataclass, field
+import platform
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from statistics import mean, pstdev
 from typing import Any, Dict, List, Tuple
@@ -49,7 +52,9 @@ class Phase6Config:
     test_split: str = "test"
 
     # --------- Seeds
-    seeds: Tuple[int, ...] = (13, 37, 71)
+    seeds: Tuple[int, ...] = (13, 37, 71, 101, 131, 151, 181, 211, 241, 271)
+    resume_existing: bool = True
+    overwrite_existing_seeds: bool = False
 
     # --------- Training budget
     epochs: int = 60
@@ -83,10 +88,183 @@ class Phase6Config:
     report_json_name: str = "phase6_test_report.json"
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device", type=str, default=None)
+    return parser.parse_args()
+
+
+def _resolve_device_from_arg(device_arg: str | None, default_device: torch.device) -> torch.device:
+    if device_arg is None:
+        return default_device
+
+    try:
+        device = torch.device(device_arg)
+    except (TypeError, RuntimeError, ValueError) as exc:
+        raise RuntimeError(f"Invalid device argument: {device_arg}") from exc
+
+    if device.type == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError(f"Requested CUDA device is unavailable because CUDA is not available: {device_arg}")
+        if device.index is not None and not (0 <= device.index < torch.cuda.device_count()):
+            raise RuntimeError(
+                f"Requested CUDA device is unavailable: {device_arg}. "
+                f"Available CUDA device count: {torch.cuda.device_count()}"
+            )
+
+    return device
+
+
 def _read_json(path: str) -> Dict[str, Any]:
     import json
     with open(path, "r") as f:
         return json.load(f)
+
+
+def _read_existing_seed_rows(csv_path: str) -> Dict[int, Dict[str, Any]]:
+    if not os.path.isfile(csv_path):
+        return {}
+
+    rows_by_seed: Dict[int, Dict[str, Any]] = {}
+    with open(csv_path, "r", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if not isinstance(row, dict):
+                continue
+            try:
+                seed = int(row.get("seed", ""))
+            except (TypeError, ValueError):
+                continue
+            rows_by_seed[seed] = dict(row)
+    return rows_by_seed
+
+
+def _row_has_existing_checkpoint(row: Dict[str, Any]) -> bool:
+    try:
+        int(row.get("seed", ""))
+    except (TypeError, ValueError):
+        return False
+
+    ckpt_last_path = str(row.get("ckpt_last_path", "")).strip()
+    if not ckpt_last_path:
+        return False
+    return os.path.exists(ckpt_last_path)
+
+
+def _merge_seed_rows(
+    existing_rows: Dict[int, Dict[str, Any]],
+    new_rows: Dict[int, Dict[str, Any]],
+    seeds: Tuple[int, ...],
+) -> List[Dict[str, Any]]:
+    merged_by_seed: Dict[int, Dict[str, Any]] = {}
+    merged_by_seed.update(existing_rows)
+    merged_by_seed.update(new_rows)
+
+    requested_seeds = sorted({int(seed) for seed in seeds})
+    return [merged_by_seed[seed] for seed in requested_seeds if seed in merged_by_seed]
+
+
+def _resolve_dataloader_runtime(cfg: Phase6Config) -> tuple[int, bool, int | None]:
+    # Windows multiprocessing compatibility safeguard:
+    # spawned workers re-import torch and can hit DLL init failures, so force single-process loading.
+    if platform.system().lower().startswith("win"):
+        return 0, False, None
+    return cfg.num_workers, cfg.persistent_workers, cfg.prefetch_factor
+
+
+def _build_report(
+    cfg: Phase6Config,
+    *,
+    candidate_id: int,
+    phase3_last_ckpt: str,
+    rows: List[Dict[str, Any]],
+    skipped_existing_seeds: List[int],
+    newly_trained_rows: Dict[int, Dict[str, Any]],
+    per_seed_csv: str,
+) -> Dict[str, Any]:
+    completed_seeds = [int(r["seed"]) for r in rows]
+    newly_trained_seeds = sorted(newly_trained_rows.keys())
+    report: Dict[str, Any] = {
+        "phase": 6,
+        "timestamp": datetime.now().isoformat(),
+        "data": {"train": "train+valid (90%)", "test": cfg.test_split, "test_used_during_training": False},
+        "training": {
+            "epochs": cfg.epochs,
+            "seeds": list(cfg.seeds),
+            "save": "LAST only",
+            "resume_existing": cfg.resume_existing,
+            "overwrite_existing_seeds": cfg.overwrite_existing_seeds,
+        },
+        "seed_status": {
+            "requested_seeds": list(cfg.seeds),
+            "completed_seeds": completed_seeds,
+            "skipped_existing_seeds": sorted(skipped_existing_seeds),
+            "newly_trained_seeds": newly_trained_seeds,
+            "resume_existing": cfg.resume_existing,
+            "overwrite_existing_seeds": cfg.overwrite_existing_seeds,
+        },
+        "winner_source": {"phase5_winner_json": cfg.phase5_winner_json, "candidate_id": candidate_id},
+        "init": {"phase3_last_ckpt": phase3_last_ckpt},
+        "runs": rows,
+        "artifacts": {"per_seed_csv": per_seed_csv},
+    }
+
+    if rows:
+        report["metrics_test"] = {
+            "soft_dice": _mean_std([float(r["test_soft_dice"]) for r in rows]),
+            "hard_dice@0.5": _mean_std([float(r["test_hard_dice@0.5"]) for r in rows]),
+            "soft_iou": _mean_std([float(r["test_soft_iou"]) for r in rows]),
+            "hard_iou@0.5": _mean_std([float(r["test_hard_iou@0.5"]) for r in rows]),
+            "precision@0.5": _mean_std([float(r["test_precision@0.5"]) for r in rows]),
+            "recall@0.5": _mean_std([float(r["test_recall@0.5"]) for r in rows]),
+            "loss": _mean_std([float(r["test_loss"]) for r in rows]),
+        }
+
+    return report
+
+
+def _save_incremental_outputs(
+    cfg: Phase6Config,
+    *,
+    candidate_id: int,
+    phase3_last_ckpt: str,
+    reusable_existing_rows: Dict[int, Dict[str, Any]],
+    newly_trained_rows: Dict[int, Dict[str, Any]],
+    skipped_existing_seeds: List[int],
+    per_seed_csv: str,
+    report_path: str,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    rows = _merge_seed_rows(reusable_existing_rows, newly_trained_rows, cfg.seeds)
+
+    save_csv_rows(
+        per_seed_csv,
+        rows,
+        fieldnames=[
+            "seed",
+            "candidate_id",
+            "loss_name",
+            "test_loss",
+            "test_soft_dice",
+            "test_hard_dice@0.5",
+            "test_soft_iou",
+            "test_hard_iou@0.5",
+            "test_precision@0.5",
+            "test_recall@0.5",
+            "ckpt_last_path",
+        ],
+    )
+
+    report = _build_report(
+        cfg,
+        candidate_id=candidate_id,
+        phase3_last_ckpt=phase3_last_ckpt,
+        rows=rows,
+        skipped_existing_seeds=skipped_existing_seeds,
+        newly_trained_rows=newly_trained_rows,
+        per_seed_csv=per_seed_csv,
+    )
+    save_json(report_path, report)
+    return rows, report
 
 
 def _build_train_loader_90(cfg: Phase6Config, batch_size: int, *, seed: int) -> DataLoader:
@@ -98,19 +276,20 @@ def _build_train_loader_90(cfg: Phase6Config, batch_size: int, *, seed: int) -> 
     ds_val_as_train = SolarPanelDataset(val_dir, mode="train", files=None, return_extra=False)
     train90_ds = ConcatDataset([ds_train, ds_val_as_train])
 
-    pw = cfg.persistent_workers and (cfg.num_workers > 0)
+    num_workers, persistent_workers, prefetch_factor = _resolve_dataloader_runtime(cfg)
+    pw = persistent_workers and (num_workers > 0)
     generator = torch.Generator().manual_seed(seed)
 
     loader = DataLoader(
         train90_ds,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=cfg.num_workers,
+        num_workers=num_workers,
         pin_memory=cfg.pin_memory,
         drop_last=cfg.drop_last_train,
         persistent_workers=pw,
-        prefetch_factor=cfg.prefetch_factor if cfg.num_workers > 0 else None,
-        worker_init_fn=seed_worker if cfg.num_workers > 0 else None,
+        prefetch_factor=prefetch_factor if num_workers > 0 else None,
+        worker_init_fn=seed_worker if num_workers > 0 else None,
         generator=generator,
     )
     return loader
@@ -120,17 +299,18 @@ def _build_test_loader(cfg: Phase6Config, batch_size: int) -> DataLoader:
     test_dir = os.path.join(cfg.data_root, cfg.test_split)
     test_ds = SolarPanelDataset(test_dir, mode="test", files=None, return_extra=False)
 
-    pw = cfg.persistent_workers and (cfg.num_workers > 0)
+    num_workers, persistent_workers, prefetch_factor = _resolve_dataloader_runtime(cfg)
+    pw = persistent_workers and (num_workers > 0)
     loader = DataLoader(
         test_ds,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=cfg.num_workers,
+        num_workers=num_workers,
         pin_memory=cfg.pin_memory,
         drop_last=False,
         persistent_workers=pw,
-        prefetch_factor=cfg.prefetch_factor if cfg.num_workers > 0 else None,
-        worker_init_fn=seed_worker if cfg.num_workers > 0 else None,
+        prefetch_factor=prefetch_factor if num_workers > 0 else None,
+        worker_init_fn=seed_worker if num_workers > 0 else None,
     )
     return loader
 
@@ -338,8 +518,12 @@ def run_one_seed(
 
 
 def main() -> None:
+    args = _parse_args()
     cfg = Phase6Config()
+    cfg = replace(cfg, device=_resolve_device_from_arg(args.device, cfg.device))
+    print(f"Using device: {cfg.device}")
     os.makedirs(cfg.out_root, exist_ok=True)
+    per_seed_csv = os.path.join(cfg.out_root, cfg.per_seed_test_csv_name)
 
     w = _read_json(cfg.phase5_winner_json)
     winner = w["winner"]
@@ -350,60 +534,71 @@ def main() -> None:
     if not os.path.isfile(phase3_last_ckpt):
         raise RuntimeError(f"Phase-3 LAST checkpoint not found: {phase3_last_ckpt}")
 
-    rows: List[Dict[str, Any]] = []
-    for seed in cfg.seeds:
-        rows.append(
-            run_one_seed(cfg, candidate_id=candidate_id, params=params, phase3_last_ckpt=phase3_last_ckpt, seed=int(seed))
-        )
-        clear_cuda_cache()
-
-    # Save per-seed CSV
-    per_seed_csv = os.path.join(cfg.out_root, cfg.per_seed_test_csv_name)
-    save_csv_rows(
-        per_seed_csv,
-        rows,
-        fieldnames=[
-            "seed",
-            "candidate_id",
-            "loss_name",
-            "test_loss",
-            "test_soft_dice",
-            "test_hard_dice@0.5",
-            "test_soft_iou",
-            "test_hard_iou@0.5",
-            "test_precision@0.5",
-            "test_recall@0.5",
-            "ckpt_last_path",
-        ],
-    )
-
-    # Aggregate report (mean±std over seeds)
-    report = {
-        "phase": 6,
-        "timestamp": datetime.now().isoformat(),
-        "data": {"train": "train+valid (90%)", "test": cfg.test_split, "test_used_during_training": False},
-        "training": {"epochs": cfg.epochs, "seeds": list(cfg.seeds), "save": "LAST only"},
-        "winner_source": {"phase5_winner_json": cfg.phase5_winner_json, "candidate_id": candidate_id},
-        "init": {"phase3_last_ckpt": phase3_last_ckpt},
-        "metrics_test": {
-            "soft_dice": _mean_std([float(r["test_soft_dice"]) for r in rows]),
-            "hard_dice@0.5": _mean_std([float(r["test_hard_dice@0.5"]) for r in rows]),
-            "soft_iou": _mean_std([float(r["test_soft_iou"]) for r in rows]),
-            "hard_iou@0.5": _mean_std([float(r["test_hard_iou@0.5"]) for r in rows]),
-            "precision@0.5": _mean_std([float(r["test_precision@0.5"]) for r in rows]),
-            "recall@0.5": _mean_std([float(r["test_recall@0.5"]) for r in rows]),
-            "loss": _mean_std([float(r["test_loss"]) for r in rows]),
-        },
-        "runs": rows,
-        "artifacts": {"per_seed_csv": per_seed_csv},
+    existing_rows = _read_existing_seed_rows(per_seed_csv)
+    reusable_existing_rows = {
+        seed: row
+        for seed, row in existing_rows.items()
+        if cfg.resume_existing and _row_has_existing_checkpoint(row)
     }
 
     report_path = os.path.join(cfg.out_root, cfg.report_json_name)
-    save_json(report_path, report)
+    skipped_existing_seeds: List[int] = [
+        int(seed)
+        for seed in cfg.seeds
+        if (not cfg.overwrite_existing_seeds) and (int(seed) in reusable_existing_rows)
+    ]
+    newly_trained_rows: Dict[int, Dict[str, Any]] = {}
+    if reusable_existing_rows:
+        _save_incremental_outputs(
+            cfg,
+            candidate_id=candidate_id,
+            phase3_last_ckpt=phase3_last_ckpt,
+            reusable_existing_rows=reusable_existing_rows,
+            newly_trained_rows=newly_trained_rows,
+            skipped_existing_seeds=skipped_existing_seeds,
+            per_seed_csv=per_seed_csv,
+            report_path=report_path,
+        )
+
+    for seed in cfg.seeds:
+        seed = int(seed)
+        if (not cfg.overwrite_existing_seeds) and (seed in reusable_existing_rows):
+            continue
+
+        newly_trained_rows[seed] = run_one_seed(
+            cfg,
+            candidate_id=candidate_id,
+            params=params,
+            phase3_last_ckpt=phase3_last_ckpt,
+            seed=seed,
+        )
+        rows, report = _save_incremental_outputs(
+            cfg,
+            candidate_id=candidate_id,
+            phase3_last_ckpt=phase3_last_ckpt,
+            reusable_existing_rows=reusable_existing_rows,
+            newly_trained_rows=newly_trained_rows,
+            skipped_existing_seeds=skipped_existing_seeds,
+            per_seed_csv=per_seed_csv,
+            report_path=report_path,
+        )
+        clear_cuda_cache()
+
+    rows, report = _save_incremental_outputs(
+        cfg,
+        candidate_id=candidate_id,
+        phase3_last_ckpt=phase3_last_ckpt,
+        reusable_existing_rows=reusable_existing_rows,
+        newly_trained_rows=newly_trained_rows,
+        skipped_existing_seeds=skipped_existing_seeds,
+        per_seed_csv=per_seed_csv,
+        report_path=report_path,
+    )
 
     print(f"✅ Phase-6 per-seed TEST CSV: {per_seed_csv}")
     print(f"✅ Phase-6 TEST report JSON: {report_path}")
-    print(f"📌 TEST soft Dice mean±std: {report['metrics_test']['soft_dice']}")
+    if "metrics_test" in report:
+        print(f"📌 TEST soft Dice mean±std: {report['metrics_test']['soft_dice']}")
 
 
 if __name__ == "__main__":

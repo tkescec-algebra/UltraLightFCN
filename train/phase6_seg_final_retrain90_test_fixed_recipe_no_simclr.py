@@ -10,14 +10,16 @@ SimCLR encoder checkpoint.
 The Phase-6 protocol remains locked:
 - TRAIN+VALID are combined for training.
 - TEST is locked-box and evaluated only once after training.
-- 60 epochs, seeds (13, 37, 71), LAST checkpoint only.
+- 60 epochs, seeds (13, 37, 71, 101, 131, 151, 181, 211, 241, 271), LAST checkpoint only.
 """
 
 from __future__ import annotations
 
+import argparse
+import csv
 import os
 import platform
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from statistics import mean, pstdev
 from typing import Any, Dict, List, Tuple
@@ -59,7 +61,9 @@ class Phase6FixedRecipeNoSimCLRConfig:
     test_split: str = "test"
 
     # --------- Seeds
-    seeds: Tuple[int, ...] = (13, 37, 71)
+    seeds: Tuple[int, ...] = (13, 37, 71, 101, 131, 151, 181, 211, 241, 271)
+    resume_existing: bool = True
+    overwrite_existing_seeds: bool = False
 
     # --------- Training budget
     epochs: int = 60
@@ -93,11 +97,81 @@ class Phase6FixedRecipeNoSimCLRConfig:
     report_json_name: str = "phase6_test_report_fixed_recipe_no_simclr.json"
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device", type=str, default=None)
+    return parser.parse_args()
+
+
+def _resolve_device_from_arg(device_arg: str | None, default_device: torch.device) -> torch.device:
+    if device_arg is None:
+        return default_device
+
+    try:
+        device = torch.device(device_arg)
+    except (TypeError, RuntimeError, ValueError) as exc:
+        raise RuntimeError(f"Invalid device argument: {device_arg}") from exc
+
+    if device.type == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError(f"Requested CUDA device is unavailable because CUDA is not available: {device_arg}")
+        if device.index is not None and not (0 <= device.index < torch.cuda.device_count()):
+            raise RuntimeError(
+                f"Requested CUDA device is unavailable: {device_arg}. "
+                f"Available CUDA device count: {torch.cuda.device_count()}"
+            )
+
+    return device
+
+
 def _read_json(path: str) -> Dict[str, Any]:
     import json
 
     with open(path, "r") as f:
         return json.load(f)
+
+
+def _read_existing_seed_rows(csv_path: str) -> Dict[int, Dict[str, Any]]:
+    if not os.path.isfile(csv_path):
+        return {}
+
+    rows_by_seed: Dict[int, Dict[str, Any]] = {}
+    with open(csv_path, "r", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if not isinstance(row, dict):
+                continue
+            try:
+                seed = int(row.get("seed", ""))
+            except (TypeError, ValueError):
+                continue
+            rows_by_seed[seed] = dict(row)
+    return rows_by_seed
+
+
+def _row_has_existing_checkpoint(row: Dict[str, Any]) -> bool:
+    try:
+        int(row.get("seed", ""))
+    except (TypeError, ValueError):
+        return False
+
+    ckpt_last_path = str(row.get("ckpt_last_path", "")).strip()
+    if not ckpt_last_path:
+        return False
+    return os.path.exists(ckpt_last_path)
+
+
+def _merge_seed_rows(
+    existing_rows: Dict[int, Dict[str, Any]],
+    new_rows: Dict[int, Dict[str, Any]],
+    seeds: Tuple[int, ...],
+) -> List[Dict[str, Any]]:
+    merged_by_seed: Dict[int, Dict[str, Any]] = {}
+    merged_by_seed.update(existing_rows)
+    merged_by_seed.update(new_rows)
+
+    requested_seeds = sorted({int(seed) for seed in seeds})
+    return [merged_by_seed[seed] for seed in requested_seeds if seed in merged_by_seed]
 
 
 def _resolve_dataloader_runtime(
@@ -130,6 +204,113 @@ def _load_phase5_winner_recipe(path: str) -> Tuple[int, Dict[str, Any]]:
         )
 
     return int(winner["candidate_id"]), dict(params)
+
+
+def _build_report(
+    cfg: Phase6FixedRecipeNoSimCLRConfig,
+    *,
+    candidate_id: int,
+    rows: List[Dict[str, Any]],
+    skipped_existing_seeds: List[int],
+    newly_trained_rows: Dict[int, Dict[str, Any]],
+    per_seed_csv: str,
+) -> Dict[str, Any]:
+    completed_seeds = [int(r["seed"]) for r in rows]
+    newly_trained_seeds = sorted(newly_trained_rows.keys())
+    report: Dict[str, Any] = {
+        "phase": 6,
+        "pretraining": PRETRAINING_NAME,
+        "encoder_init": INIT_TYPE,
+        "ablation": ABLATION_NAME,
+        "simclr_pretraining_loaded": SIMCLR_PRETRAINING_LOADED,
+        "uses_simclr_phase5_winner_params": USES_SIMCLR_PHASE5_WINNER_PARAMS,
+        "phase5_recipe_source": cfg.phase5_winner_json,
+        "test_policy": TEST_POLICY_NAME,
+        "timestamp": datetime.now().isoformat(),
+        "data": {"train": "train+valid (90%)", "test": cfg.test_split, "test_used_during_training": False},
+        "training": {
+            "epochs": cfg.epochs,
+            "seeds": list(cfg.seeds),
+            "save": "LAST only",
+            "resume_existing": cfg.resume_existing,
+            "overwrite_existing_seeds": cfg.overwrite_existing_seeds,
+        },
+        "seed_status": {
+            "requested_seeds": list(cfg.seeds),
+            "completed_seeds": completed_seeds,
+            "skipped_existing_seeds": sorted(skipped_existing_seeds),
+            "newly_trained_seeds": newly_trained_seeds,
+            "resume_existing": cfg.resume_existing,
+            "overwrite_existing_seeds": cfg.overwrite_existing_seeds,
+        },
+        "winner_source": {"phase5_winner_json": cfg.phase5_winner_json, "candidate_id": candidate_id},
+        "init": {
+            "type": INIT_TYPE,
+            "pretraining": PRETRAINING_NAME,
+            "encoder_init": INIT_TYPE,
+            "simclr_pretraining_loaded": SIMCLR_PRETRAINING_LOADED,
+        },
+        "runs": rows,
+        "artifacts": {"per_seed_csv": per_seed_csv},
+    }
+
+    if rows:
+        report["metrics_test"] = {
+            "soft_dice": _mean_std([float(r["test_soft_dice"]) for r in rows]),
+            "hard_dice@0.5": _mean_std([float(r["test_hard_dice@0.5"]) for r in rows]),
+            "soft_iou": _mean_std([float(r["test_soft_iou"]) for r in rows]),
+            "hard_iou@0.5": _mean_std([float(r["test_hard_iou@0.5"]) for r in rows]),
+            "precision@0.5": _mean_std([float(r["test_precision@0.5"]) for r in rows]),
+            "recall@0.5": _mean_std([float(r["test_recall@0.5"]) for r in rows]),
+            "loss": _mean_std([float(r["test_loss"]) for r in rows]),
+        }
+
+    if report["init"]["simclr_pretraining_loaded"] is not False:
+        raise RuntimeError("Report metadata must record simclr_pretraining_loaded=False.")
+
+    return report
+
+
+def _save_incremental_outputs(
+    cfg: Phase6FixedRecipeNoSimCLRConfig,
+    *,
+    candidate_id: int,
+    reusable_existing_rows: Dict[int, Dict[str, Any]],
+    newly_trained_rows: Dict[int, Dict[str, Any]],
+    skipped_existing_seeds: List[int],
+    per_seed_csv: str,
+    report_path: str,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    rows = _merge_seed_rows(reusable_existing_rows, newly_trained_rows, cfg.seeds)
+
+    save_csv_rows(
+        per_seed_csv,
+        rows,
+        fieldnames=[
+            "seed",
+            "candidate_id",
+            "loss_name",
+            "test_loss",
+            "test_soft_dice",
+            "test_hard_dice@0.5",
+            "test_soft_iou",
+            "test_hard_iou@0.5",
+            "test_precision@0.5",
+            "test_recall@0.5",
+            "ckpt_last_path",
+        ],
+    )
+
+    report = _build_report(
+        cfg,
+        candidate_id=candidate_id,
+        rows=rows,
+        skipped_existing_seeds=skipped_existing_seeds,
+        newly_trained_rows=newly_trained_rows,
+        per_seed_csv=per_seed_csv,
+    )
+    save_json(report_path, report)
+    return rows, report
 
 
 def _build_train_loader_90(
@@ -384,8 +565,12 @@ def run_one_seed(
 
 
 def main() -> None:
+    args = _parse_args()
     cfg = Phase6FixedRecipeNoSimCLRConfig()
+    cfg = replace(cfg, device=_resolve_device_from_arg(args.device, cfg.device))
+    print(f"Using device: {cfg.device}")
     os.makedirs(cfg.out_root, exist_ok=True)
+    per_seed_csv = os.path.join(cfg.out_root, cfg.per_seed_test_csv_name)
 
     candidate_id, params = _load_phase5_winner_recipe(cfg.phase5_winner_json)
     if "enc_lr_mult" not in params:
@@ -393,71 +578,63 @@ def main() -> None:
             "Fixed-recipe no-SimCLR ablation requires 'enc_lr_mult' from the original SimCLR Phase-5 winner params."
         )
 
-    rows: List[Dict[str, Any]] = []
-    for seed in cfg.seeds:
-        rows.append(run_one_seed(cfg, candidate_id=candidate_id, params=params, seed=int(seed)))
-        clear_cuda_cache()
-
-    per_seed_csv = os.path.join(cfg.out_root, cfg.per_seed_test_csv_name)
-    save_csv_rows(
-        per_seed_csv,
-        rows,
-        fieldnames=[
-            "seed",
-            "candidate_id",
-            "loss_name",
-            "test_loss",
-            "test_soft_dice",
-            "test_hard_dice@0.5",
-            "test_soft_iou",
-            "test_hard_iou@0.5",
-            "test_precision@0.5",
-            "test_recall@0.5",
-            "ckpt_last_path",
-        ],
-    )
-
-    report = {
-        "phase": 6,
-        "pretraining": PRETRAINING_NAME,
-        "encoder_init": INIT_TYPE,
-        "ablation": ABLATION_NAME,
-        "simclr_pretraining_loaded": SIMCLR_PRETRAINING_LOADED,
-        "uses_simclr_phase5_winner_params": USES_SIMCLR_PHASE5_WINNER_PARAMS,
-        "phase5_recipe_source": cfg.phase5_winner_json,
-        "test_policy": TEST_POLICY_NAME,
-        "timestamp": datetime.now().isoformat(),
-        "data": {"train": "train+valid (90%)", "test": cfg.test_split, "test_used_during_training": False},
-        "training": {"epochs": cfg.epochs, "seeds": list(cfg.seeds), "save": "LAST only"},
-        "winner_source": {"phase5_winner_json": cfg.phase5_winner_json, "candidate_id": candidate_id},
-        "init": {
-            "type": INIT_TYPE,
-            "pretraining": PRETRAINING_NAME,
-            "encoder_init": INIT_TYPE,
-            "simclr_pretraining_loaded": SIMCLR_PRETRAINING_LOADED,
-        },
-        "metrics_test": {
-            "soft_dice": _mean_std([float(r["test_soft_dice"]) for r in rows]),
-            "hard_dice@0.5": _mean_std([float(r["test_hard_dice@0.5"]) for r in rows]),
-            "soft_iou": _mean_std([float(r["test_soft_iou"]) for r in rows]),
-            "hard_iou@0.5": _mean_std([float(r["test_hard_iou@0.5"]) for r in rows]),
-            "precision@0.5": _mean_std([float(r["test_precision@0.5"]) for r in rows]),
-            "recall@0.5": _mean_std([float(r["test_recall@0.5"]) for r in rows]),
-            "loss": _mean_std([float(r["test_loss"]) for r in rows]),
-        },
-        "runs": rows,
-        "artifacts": {"per_seed_csv": per_seed_csv},
+    existing_rows = _read_existing_seed_rows(per_seed_csv)
+    reusable_existing_rows = {
+        seed: row
+        for seed, row in existing_rows.items()
+        if cfg.resume_existing and _row_has_existing_checkpoint(row)
     }
-    if report["init"]["simclr_pretraining_loaded"] is not False:
-        raise RuntimeError("Report metadata must record simclr_pretraining_loaded=False.")
 
     report_path = os.path.join(cfg.out_root, cfg.report_json_name)
-    save_json(report_path, report)
+    skipped_existing_seeds: List[int] = [
+        int(seed)
+        for seed in cfg.seeds
+        if (not cfg.overwrite_existing_seeds) and (int(seed) in reusable_existing_rows)
+    ]
+    newly_trained_rows: Dict[int, Dict[str, Any]] = {}
+    if reusable_existing_rows:
+        _save_incremental_outputs(
+            cfg,
+            candidate_id=candidate_id,
+            reusable_existing_rows=reusable_existing_rows,
+            newly_trained_rows=newly_trained_rows,
+            skipped_existing_seeds=skipped_existing_seeds,
+            per_seed_csv=per_seed_csv,
+            report_path=report_path,
+        )
+
+    for seed in cfg.seeds:
+        seed = int(seed)
+        if (not cfg.overwrite_existing_seeds) and (seed in reusable_existing_rows):
+            continue
+
+        newly_trained_rows[seed] = run_one_seed(cfg, candidate_id=candidate_id, params=params, seed=seed)
+        rows, report = _save_incremental_outputs(
+            cfg,
+            candidate_id=candidate_id,
+            reusable_existing_rows=reusable_existing_rows,
+            newly_trained_rows=newly_trained_rows,
+            skipped_existing_seeds=skipped_existing_seeds,
+            per_seed_csv=per_seed_csv,
+            report_path=report_path,
+        )
+        clear_cuda_cache()
+
+    rows, report = _save_incremental_outputs(
+        cfg,
+        candidate_id=candidate_id,
+        reusable_existing_rows=reusable_existing_rows,
+        newly_trained_rows=newly_trained_rows,
+        skipped_existing_seeds=skipped_existing_seeds,
+        per_seed_csv=per_seed_csv,
+        report_path=report_path,
+    )
 
     print(f"[{ABLATION_NAME}] init={INIT_TYPE} simclr_pretraining_loaded={SIMCLR_PRETRAINING_LOADED}")
     print(f"Phase-6 fixed-recipe no-SimCLR per-seed TEST CSV: {per_seed_csv}")
     print(f"Phase-6 fixed-recipe no-SimCLR TEST report JSON: {report_path}")
-    print(f"TEST soft Dice mean+/-std: {report['metrics_test']['soft_dice']}")
+    if "metrics_test" in report:
+        print(f"TEST soft Dice mean+/-std: {report['metrics_test']['soft_dice']}")
 
 
 if __name__ == "__main__":
