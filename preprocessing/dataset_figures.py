@@ -168,6 +168,27 @@ def style_axis(ax: plt.Axes, cfg: DatasetFigureConfig, *, y_grid_only: bool = Tr
     ax.tick_params(axis="both", labelsize=cfg.tick_fontsize)
 
 
+def set_axis_text_bold(ax: plt.Axes) -> None:
+    """Make all visible text elements on an axis bold."""
+    ax.title.set_fontweight("bold")
+    ax.xaxis.label.set_fontweight("bold")
+    ax.yaxis.label.set_fontweight("bold")
+
+    for tick_label in ax.get_xticklabels() + ax.get_yticklabels():
+        tick_label.set_fontweight("bold")
+
+    for text in ax.texts:
+        text.set_fontweight("bold")
+
+    legend = ax.get_legend()
+    if legend is not None:
+        for text in legend.get_texts():
+            text.set_fontweight("bold")
+        title = legend.get_title()
+        if title is not None:
+            title.set_fontweight("bold")
+
+
 def add_bar_labels(ax: plt.Axes, bar_groups: List, cfg: DatasetFigureConfig, scale: float = 1.08) -> None:
     """Add numeric labels above bar containers."""
     for bars in bar_groups:
@@ -180,6 +201,7 @@ def add_bar_labels(ax: plt.Axes, bar_groups: List, cfg: DatasetFigureConfig, sca
                 ha="center",
                 va="bottom",
                 fontsize=cfg.annotation_fontsize,
+                fontweight="bold",
             )
 
 
@@ -202,12 +224,12 @@ def plot_panel_a_tile_distribution(ax: plt.Axes, stats: dict, cfg: DatasetFigure
         fontweight="bold",
     )
     ax.set_xticks(x)
-    ax.set_xticklabels(SUBSETS)
-    ax.set_ylabel("Number of tiles (log scale)", fontsize=cfg.label_fontsize)
+    ax.set_xticklabels(SUBSETS, fontweight="bold")
+    ax.set_ylabel("Number of tiles (log scale)", fontsize=cfg.label_fontsize, fontweight="bold")
     ax.set_yscale("log")
     ax.set_ylim(10, 30000)
     style_axis(ax, cfg, which="both")
-    ax.legend(frameon=False, loc="upper right", fontsize=cfg.legend_fontsize)
+    ax.legend(frameon=False, loc="upper right", prop={"size": cfg.legend_fontsize, "weight": "bold"})
     add_bar_labels(ax, [bars_pos, bars_neg], cfg)
 
 
@@ -229,12 +251,12 @@ def plot_panel_b_split_distribution(ax: plt.Axes, stats: dict, cfg: DatasetFigur
         fontweight="bold",
     )
     ax.set_xticks(x)
-    ax.set_xticklabels(SPLITS)
-    ax.set_ylabel("Number of tiles (log scale)", fontsize=cfg.label_fontsize)
+    ax.set_xticklabels(SPLITS, fontweight="bold")
+    ax.set_ylabel("Number of tiles (log scale)", fontsize=cfg.label_fontsize, fontweight="bold")
     ax.set_yscale("log")
     ax.set_ylim(10, 30000)
     style_axis(ax, cfg, which="both")
-    ax.legend(frameon=False, loc="upper right", fontsize=cfg.legend_fontsize)
+    ax.legend(frameon=False, loc="upper right", prop={"size": cfg.legend_fontsize, "weight": "bold"})
     add_bar_labels(ax, [bars_pv01, bars_pv03, bars_pv08], cfg)
 
 
@@ -272,8 +294,8 @@ def plot_panel_c_mask_histogram(ax: plt.Axes, stats: dict, cfg: DatasetFigureCon
         pad=cfg.title_pad,
         fontweight="bold",
     )
-    ax.set_xlabel("Mask coverage (%)", fontsize=cfg.label_fontsize)
-    ax.set_ylabel("Number of tiles", fontsize=cfg.label_fontsize)
+    ax.set_xlabel("Mask coverage (%)", fontsize=cfg.label_fontsize, fontweight="bold")
+    ax.set_ylabel("Number of tiles", fontsize=cfg.label_fontsize, fontweight="bold")
     ax.set_xlim(0, 100)
     ax.yaxis.set_major_formatter(yfmt)
     style_axis(ax, cfg)
@@ -299,7 +321,7 @@ def plot_panel_c_mask_histogram(ax: plt.Axes, stats: dict, cfg: DatasetFigureCon
         ordered_handles,
         ordered_labels,
         frameon=False,
-        fontsize=cfg.annotation_fontsize,
+        prop={"size": cfg.annotation_fontsize, "weight": "bold"},
         bbox_to_anchor=(0.95, 0.98)
     )
 
@@ -321,11 +343,11 @@ def plot_panel_d_mask_boxplot(ax: plt.Axes, stats: dict, cfg: DatasetFigureConfi
         pad=cfg.title_pad,
         fontweight="bold",
     )
-    ax.set_xlabel("Subset", fontsize=cfg.label_fontsize)
-    ax.set_ylabel("Mask coverage (%)", fontsize=cfg.label_fontsize)
+    ax.set_xlabel("Subset", fontsize=cfg.label_fontsize, fontweight="bold")
+    ax.set_ylabel("Mask coverage (%)", fontsize=cfg.label_fontsize, fontweight="bold")
     ax.set_ylim(0, 100)
     style_axis(ax, cfg)
-    ax.legend(frameon=False, fontsize=cfg.legend_fontsize)
+    ax.legend(frameon=False, prop={"size": cfg.legend_fontsize, "weight": "bold"})
 
 
 # -----------------------------
@@ -346,6 +368,9 @@ def make_figure_2_grid(records: List[dict], cfg: DatasetFigureConfig) -> plt.Fig
     plot_panel_b_split_distribution(ax_b, stats, cfg)
     plot_panel_c_mask_histogram(ax_c, stats, cfg)
     plot_panel_d_mask_boxplot(ax_d, stats, cfg)
+
+    for ax in (ax_a, ax_b, ax_c, ax_d):
+        set_axis_text_bold(ax)
 
     # fig.tight_layout(rect=cfg.tight_layout_rect)
     fig.subplots_adjust(left=0.07, right=0.99, bottom=0.08, top=0.94,

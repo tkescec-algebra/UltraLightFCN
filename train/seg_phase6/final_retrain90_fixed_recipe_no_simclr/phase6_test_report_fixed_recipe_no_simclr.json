@@ -1,0 +1,108 @@
+{
+  "phase": 6,
+  "pretraining": "none",
+  "encoder_init": "random",
+  "ablation": "fixed_recipe_no_simclr",
+  "simclr_pretraining_loaded": false,
+  "uses_simclr_phase5_winner_params": true,
+  "phase5_recipe_source": "seg_phase5/topk_retrain/phase5_winner.json",
+  "test_policy": "locked_box_test_after_training",
+  "data": {
+    "train": "train+valid (90%)",
+    "test": "test",
+    "test_used_during_training": false
+  },
+  "training": {
+    "epochs": 60,
+    "seeds": [
+      13,
+      37,
+      71
+    ],
+    "save": "LAST only"
+  },
+  "winner_source": {
+    "phase5_winner_json": "seg_phase5/topk_retrain/phase5_winner.json",
+    "candidate_id": 54
+  },
+  "init": {
+    "type": "random",
+    "pretraining": "none",
+    "encoder_init": "random",
+    "simclr_pretraining_loaded": false
+  },
+  "metrics_test": {
+    "soft_dice": {
+      "mean": 0.7062762978782872,
+      "std": 0.004665777244840746
+    },
+    "hard_dice@0.5": {
+      "mean": 0.8901325739520137,
+      "std": 0.002293836636953195
+    },
+    "soft_iou": {
+      "mean": 0.6679033742412089,
+      "std": 0.004377383590034729
+    },
+    "hard_iou@0.5": {
+      "mean": 0.8587218035287211,
+      "std": 0.0022522344127496284
+    },
+    "precision@0.5": {
+      "mean": 0.9190011049723555,
+      "std": 0.0023866235863027286
+    },
+    "recall@0.5": {
+      "mean": 0.9289603734297738,
+      "std": 0.00023020690452195787
+    },
+    "loss": {
+      "mean": 0.06715567785466316,
+      "std": 0.00031391465484163013
+    }
+  },
+  "runs": [
+    {
+      "seed": "13",
+      "candidate_id": "54",
+      "loss_name": "BCEDiceLoss",
+      "test_loss": "0.06671174976941759",
+      "test_soft_dice": "0.699695026900916",
+      "test_hard_dice@0.5": "0.8924843647416714",
+      "test_soft_iou": "0.6617128415682675",
+      "test_hard_iou@0.5": "0.8609135820380355",
+      "test_precision@0.5": "0.9216661011012255",
+      "test_recall@0.5": "0.9292701518641109",
+      "ckpt_last_path": "seg_phase6/final_retrain90_fixed_recipe_no_simclr\\trial_54\\seed_13\\last.pth"
+    },
+    {
+      "seed": "37",
+      "candidate_id": "54",
+      "loss_name": "BCEDiceLoss",
+      "test_loss": "0.0673807252613844",
+      "test_soft_dice": "0.7099784794634423",
+      "test_hard_dice@0.5": "0.8870216488838196",
+      "test_soft_iou": "0.6709841643768338",
+      "test_hard_iou@0.5": "0.8556244348213736",
+      "test_precision@0.5": "0.9158749221700483",
+      "test_recall@0.5": "0.9288922068714041",
+      "ckpt_last_path": "seg_phase6/final_retrain90_fixed_recipe_no_simclr\\trial_54\\seed_37\\last.pth"
+    },
+    {
+      "seed": 71,
+      "candidate_id": 54,
+      "loss_name": "BCEDiceLoss",
+      "ckpt_last_path": "seg_phase6/final_retrain90_fixed_recipe_no_simclr\\trial_54\\seed_71\\last.pth",
+      "test_loss": 0.06737455853318747,
+      "test_soft_dice": 0.7091553872705033,
+      "test_hard_dice@0.5": 0.8908917082305503,
+      "test_soft_iou": 0.6710131167785256,
+      "test_hard_iou@0.5": 0.859627393726754,
+      "test_precision@0.5": 0.9194622916457927,
+      "test_recall@0.5": 0.9287187615538065
+    }
+  ],
+  "artifacts": {
+    "per_seed_csv": "seg_phase6/final_retrain90_fixed_recipe_no_simclr\\phase6_test_per_seed_fixed_recipe_no_simclr.csv"
+  }
+}

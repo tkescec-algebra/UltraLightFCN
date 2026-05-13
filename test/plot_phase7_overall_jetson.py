@@ -51,6 +51,44 @@ import utils.config as config
 
 
 # -----------------------------
+# Global font settings
+# -----------------------------
+plt.rcParams.update({
+    "font.weight": "bold",
+    "axes.labelweight": "bold",
+    "axes.titleweight": "bold",
+    "figure.titleweight": "bold",
+})
+
+
+def make_all_text_bold(fig: plt.Figure) -> None:
+    """Force all text objects in a Matplotlib figure to bold.
+
+    This catches titles, axis labels, tick labels, legends, suptitles,
+    colorbar labels/ticks, and any manually created text objects.
+    """
+    for text_obj in fig.findobj(match=plt.Text):
+        text_obj.set_fontweight("bold")
+
+    for ax in fig.axes:
+        title = ax.get_title()
+        if title:
+            ax.title.set_fontweight("bold")
+        ax.xaxis.label.set_fontweight("bold")
+        ax.yaxis.label.set_fontweight("bold")
+
+        for tick_label in ax.get_xticklabels(which="both") + ax.get_yticklabels(which="both"):
+            tick_label.set_fontweight("bold")
+
+        legend = ax.get_legend()
+        if legend is not None:
+            for legend_text in legend.get_texts():
+                legend_text.set_fontweight("bold")
+            if legend.get_title() is not None:
+                legend.get_title().set_fontweight("bold")
+
+
+# -----------------------------
 # Parsing model_id / ckpt_path for Jetson export
 # -----------------------------
 
@@ -144,8 +182,10 @@ def bds_score(
 
 def save_fig(fig: plt.Figure, outpath: Path, dpi: int = 300, use_tight_layout: bool = True) -> None:
     outpath.parent.mkdir(parents=True, exist_ok=True)
+    make_all_text_bold(fig)
     if use_tight_layout:
         fig.tight_layout()
+    make_all_text_bold(fig)
     fig.savefig(outpath.with_suffix(".pdf"))
     fig.savefig(outpath.with_suffix(".png"), dpi=dpi)
     plt.close(fig)

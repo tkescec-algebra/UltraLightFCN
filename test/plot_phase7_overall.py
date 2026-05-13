@@ -50,6 +50,27 @@ import utils.config as config
 
 
 # -----------------------------
+# Global Matplotlib text styling
+# -----------------------------
+plt.rcParams.update({
+    "font.weight": "bold",
+    "axes.labelweight": "bold",
+    "axes.titleweight": "bold",
+    "figure.titleweight": "bold",
+})
+
+
+def make_all_text_bold(fig: plt.Figure) -> None:
+    """Force all text elements in a Matplotlib figure to bold.
+
+    This catches titles, axis labels, tick labels, legends, colorbar labels,
+    suptitles, and text objects added manually by plot functions.
+    """
+    for text_obj in fig.findobj(match=plt.Text):
+        text_obj.set_fontweight("bold")
+
+
+# -----------------------------
 # Parsing model_id
 # -----------------------------
 
@@ -118,6 +139,7 @@ def bds_score(
 
 def save_fig(fig: plt.Figure, outpath: Path, dpi: int = 300, use_tight_layout: bool = True) -> None:
     outpath.parent.mkdir(parents=True, exist_ok=True)
+    make_all_text_bold(fig)
     if use_tight_layout:
         fig.tight_layout()
     fig.savefig(outpath.with_suffix(".pdf"))
@@ -710,7 +732,7 @@ def save_overview_pareto_2x2(ctx: PlotContext) -> None:
         borderpad=1,
         labelspacing=2,
     )
-    fig.suptitle("Phase-7 overview: Pareto views", y=0.98)
+    fig.suptitle("Phase-7 overview: Pareto views", y=0.98, fontweight="bold")
     save_fig(fig, ctx.settings.outdir / "overview_pareto_2x2", use_tight_layout=False)
 
 
@@ -725,7 +747,7 @@ def save_dice_panels_2x2(ctx: PlotContext) -> None:
     }
     for ax, subset in zip(axes, ["overall", "PV01", "PV03", "PV08"]):
         draw_dice_subset_panel(ax, ctx, subset=subset, title=subset_titles[subset], show_ylabel=True)
-    fig.suptitle("Hard Dice@0.5 on TEST (mean±std across seeds)")
+    fig.suptitle("Hard Dice@0.5 on TEST (mean±std across seeds)", fontweight="bold")
     fig.tight_layout(rect=[0.0, 0.0, 1.0, 0.95])
     save_fig(fig, ctx.settings.outdir / "dice_panels_overall_pv01_pv03_pv08", use_tight_layout=False)
 

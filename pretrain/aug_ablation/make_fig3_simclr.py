@@ -30,6 +30,29 @@ import matplotlib.ticker as mticker
 
 
 # -----------------------------
+# Global font settings
+# -----------------------------
+# Make all standard Matplotlib text bold by default:
+# titles, axis labels, tick labels, legends, and colorbar labels.
+plt.rcParams.update({
+    "font.weight": "bold",
+    "axes.titleweight": "bold",
+    "axes.labelweight": "bold",
+    "figure.titleweight": "bold",
+})
+
+
+def make_all_text_bold(fig: plt.Figure) -> None:
+    """Force every text object in a figure to bold.
+
+    This catches manually created labels, annotations, tick labels, legends,
+    and colorbar tick labels after each plot has been assembled.
+    """
+    for text_obj in fig.findobj(match=plt.Text):
+        text_obj.set_fontweight("bold")
+
+
+# -----------------------------
 # Config dataclass (as requested)
 # -----------------------------
 @dataclass(frozen=True)
@@ -136,6 +159,19 @@ def aggregate_epoch_mean_std(df: pd.DataFrame, value_col: str) -> Tuple[np.ndarr
     return epochs, mean, std
 
 
+def get_contrast_text_color(im, value: float, threshold: float = 0.5) -> str:
+    """Return black or white text depending on the rendered heatmap cell color.
+
+    The color is computed from the actual image colormap and normalization, so it
+    stays correct if the heatmap colormap or data range changes.
+    """
+    r, g, b, _ = im.cmap(im.norm(float(value)))
+
+    # Relative luminance, using the standard RGB luminance weights.
+    luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    return "white" if luminance < threshold else "black"
+
+
 # -----------------------------
 # Plot A: Augmentation sensitivity heatmap (Δ vs baseline)
 # -----------------------------
@@ -165,11 +201,22 @@ def plot_aug_sensitivity_heatmap(
 
     for i in range(df.shape[0]):
         for j in range(df.shape[1]):
-            ax.text(j, i, f"{data[i, j]:.3f}", ha="center", va="center", fontsize=9)
+            value = data[i, j]
+            ax.text(
+                j,
+                i,
+                f"{value:.3f}",
+                ha="center",
+                va="center",
+                fontsize=9,
+                fontweight="bold",
+                color=get_contrast_text_color(im, value),
+            )
 
     cbar = fig.colorbar(im, ax=ax)
     cbar.set_label("Δ vs baseline")
 
+    make_all_text_bold(fig)
     fig.tight_layout()
     return fig
 
@@ -202,6 +249,7 @@ def plot_pretrain_convergence(
     h2, l2 = ax2.get_legend_handles_labels()
     ax1.legend(h1 + h2, l1 + l2, loc="best")
 
+    make_all_text_bold(fig)
     fig.tight_layout()
     return fig
 
@@ -286,6 +334,7 @@ def plot_alignment_uniformity_scatter_colored(
             xytext=(dx, dy),
             textcoords="offset points",
             fontsize=10,
+            fontweight="bold",
             ha="left",
             va="center",
             zorder=4,
@@ -306,6 +355,7 @@ def plot_alignment_uniformity_scatter_colored(
     cbar = fig.colorbar(sc, ax=ax)
     cbar.set_label("Δ NT-Xent (late) vs baseline")
 
+    make_all_text_bold(fig)
     fig.tight_layout()
     return fig
 
@@ -348,6 +398,7 @@ def plot_impact_ranking(
         capsize=3,
     )
 
+    make_all_text_bold(fig)
     fig.tight_layout()
     return fig
 
@@ -390,7 +441,17 @@ def make_figure2_grid(
     axA.set_xticklabels(dfA.columns, rotation=25, ha="right")
     for i in range(dfA.shape[0]):
         for j in range(dfA.shape[1]):
-            axA.text(j, i, f"{dataA[i, j]:.3f}", ha="center", va="center", fontsize=8)
+            value = dataA[i, j]
+            axA.text(
+                j,
+                i,
+                f"{value:.3f}",
+                ha="center",
+                va="center",
+                fontsize=8,
+                fontweight="bold",
+                color=get_contrast_text_color(im, value),
+            )
     cbarA = fig.colorbar(im, ax=axA, fraction=0.046, pad=0.04)
     cbarA.set_label("Δ vs baseline")
 
@@ -468,6 +529,7 @@ def make_figure2_grid(
             xytext=(dx, dy),
             textcoords="offset points",
             fontsize=9,
+            fontweight="bold",
             ha="left",
             va="center",
             zorder=4,
@@ -515,6 +577,7 @@ def make_figure2_grid(
     # fig.suptitle(suptitle, y=0.98, fontsize=14)
 
     # Use a slightly larger top margin; keep our spacing (avoid squeezing)
+    make_all_text_bold(fig)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
     return fig
 

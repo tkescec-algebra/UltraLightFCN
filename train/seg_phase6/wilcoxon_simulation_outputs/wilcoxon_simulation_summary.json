@@ -1,0 +1,73 @@
+{
+  "analysis_note": "Internal simulation-based planning analysis only; not manuscript evidence.",
+  "methodological_notes": [
+    "Simulation uses only currently available observed seeds, so estimated power is uncertain.",
+    "Primary manuscript-level evidence must come from the actual extended 10-seed experiment.",
+    "A one-sided test is justified only if the directional hypothesis is defined before final 10-seed evaluation."
+  ],
+  "input_files": {
+    "simclr_csv": "C:\\Machine_Learning\\Projects\\UltraLightFCN\\train\\seg_phase6\\final_retrain90\\phase6_test_per_seed.csv",
+    "nosimclr_csv": "C:\\Machine_Learning\\Projects\\UltraLightFCN\\train\\seg_phase6\\final_retrain90_fixed_recipe_no_simclr\\phase6_test_per_seed_fixed_recipe_no_simclr.csv"
+  },
+  "metric": "test_hard_dice@0.5",
+  "observed_n": 3,
+  "target_n": 10,
+  "observed_mean_values": {
+    "simclr": 0.8973643613283612,
+    "nosimclr": 0.8901325739520137
+  },
+  "observed_paired_differences_summary": {
+    "mean": 0.0072317873763475165,
+    "std": 0.006388817568171625,
+    "median": 0.009100142453624005,
+    "min": 0.00011708179406366703,
+    "max": 0.012478137881354878
+  },
+  "observed_wilcoxon": {
+    "one_sided_simclr_greater": {
+      "statistic_w_plus": 6.0,
+      "p_value": 0.125,
+      "n_nonzero": 3,
+      "warning": null
+    },
+    "two_sided_reference": {
+      "statistic_w_plus": 6.0,
+      "p_value": 0.25,
+      "n_nonzero": 3,
+      "warning": null
+    }
+  },
+  "simulation_settings": {
+    "num_simulations": 100000,
+    "alpha": 0.05,
+    "random_seed": 42,
+    "sampling_model": "Empirical bootstrap of observed paired differences.",
+    "invalid_tests": 0
+  },
+  "estimated_probability_p_lt_alpha": 1.0,
+  "simulation_summaries": {
+    "simulated_mean_differences": {
+      "mean": 0.0072263267924641455,
+      "std": 0.0016460762905531156,
+      "median": 0.007303530321711937,
+      "min": 0.0010153878600197008,
+      "max": 0.012478137881354878
+    },
+    "simulated_one_sided_p_values": {
+      "mean": 0.0009765625,
+      "std": 0.0,
+      "median": 0.0009765625,
+      "min": 0.0009765625,
+      "max": 0.0009765625
+    }
+  },
+  "outputs": {
+    "observed_csv": "C:\\Machine_Learning\\Projects\\UltraLightFCN\\train\\seg_phase6\\wilcoxon_simulation_outputs\\observed_paired_values_and_differences.csv",
+    "plots": [
+      "C:\\Machine_Learning\\Projects\\UltraLightFCN\\train\\seg_phase6\\wilcoxon_simulation_outputs\\observed_simclr_vs_no_simclr_boxplot.png",
+      "C:\\Machine_Learning\\Projects\\UltraLightFCN\\train\\seg_phase6\\wilcoxon_simulation_outputs\\observed_paired_differences_boxplot.png",
+      "C:\\Machine_Learning\\Projects\\UltraLightFCN\\train\\seg_phase6\\wilcoxon_simulation_outputs\\simulated_10_seed_mean_differences_histogram.png",
+      "C:\\Machine_Learning\\Projects\\UltraLightFCN\\train\\seg_phase6\\wilcoxon_simulation_outputs\\simulated_10_seed_wilcoxon_pvalues_histogram.png"
+    ]
+  }
+}
