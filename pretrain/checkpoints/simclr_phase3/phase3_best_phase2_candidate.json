@@ -1,0 +1,13 @@
+{
+  "batch_size": 256,
+  "lr": 0.0029945367192992247,
+  "weight_decay": 9.902794208036887e-05,
+  "temperature": 0.05827617288878179,
+  "warmup_ratio": 0.12110690633858313,
+  "grad_clip": 2.0,
+  "proj_hidden_dim": 256,
+  "proj_out_dim": 128,
+  "trial_number": 83,
+  "mini_val_soft_dice": 0.6645085967912374,
+  "optuna_rank_proxy_value": 0.12218767182380323
+}
