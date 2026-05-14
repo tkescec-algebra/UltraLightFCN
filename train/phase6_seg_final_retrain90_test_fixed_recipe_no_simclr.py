@@ -61,7 +61,7 @@ class Phase6FixedRecipeNoSimCLRConfig:
     test_split: str = "test"
 
     # --------- Seeds
-    seeds: Tuple[int, ...] = (13, 37, 71, 101, 131, 151, 181, 211, 241, 271)
+    seeds: Tuple[int, ...] = (13, 37, 71, 101, 131, 151, 181, 211, 241, 271, 307, 353, 409, 457, 521, 601, 701, 809, 907, 997)
     resume_existing: bool = True
     overwrite_existing_seeds: bool = False
 
