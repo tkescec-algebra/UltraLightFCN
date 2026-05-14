@@ -1,6 +1,6 @@
 {
   "phase": 6,
-  "timestamp": "2026-05-14T07:44:59.109437",
+  "timestamp": "2026-05-14T16:13:06.767410",
   "data": {
     "train": "train+valid (90%)",
     "test": "test",
@@ -67,7 +67,17 @@
       181,
       211,
       241,
-      271
+      271,
+      307,
+      353,
+      409,
+      457,
+      521,
+      601,
+      701,
+      809,
+      907,
+      997
     ],
     "skipped_existing_seeds": [
       13,
@@ -81,7 +91,18 @@
       241,
       271
     ],
-    "newly_trained_seeds": [],
+    "newly_trained_seeds": [
+      307,
+      353,
+      409,
+      457,
+      521,
+      601,
+      701,
+      809,
+      907,
+      997
+    ],
     "resume_existing": true,
     "overwrite_existing_seeds": false
   },
@@ -222,39 +243,169 @@
       "test_precision@0.5": "0.9264481752741653",
       "test_recall@0.5": "0.9298890357945873",
       "ckpt_last_path": "seg_phase6/final_retrain90/trial_54/seed_271/last.pth"
+    },
+    {
+      "seed": 307,
+      "candidate_id": 54,
+      "loss_name": "BCEDiceLoss",
+      "ckpt_last_path": "seg_phase6/final_retrain90/trial_54/seed_307/last.pth",
+      "test_loss": 0.06653484534373326,
+      "test_soft_dice": 0.719401852108736,
+      "test_hard_dice@0.5": 0.896711956209841,
+      "test_soft_iou": 0.6815946769655015,
+      "test_hard_iou@0.5": 0.8652772015385923,
+      "test_precision@0.5": 0.9287504168105336,
+      "test_recall@0.5": 0.9279425660487824
+    },
+    {
+      "seed": 353,
+      "candidate_id": 54,
+      "loss_name": "BCEDiceLoss",
+      "ckpt_last_path": "seg_phase6/final_retrain90/trial_54/seed_353/last.pth",
+      "test_loss": 0.0646041402932817,
+      "test_soft_dice": 0.7142943282662767,
+      "test_hard_dice@0.5": 0.9026057138696181,
+      "test_soft_iou": 0.6774266976071933,
+      "test_hard_iou@0.5": 0.8716801246077613,
+      "test_precision@0.5": 0.931072609466789,
+      "test_recall@0.5": 0.9314520071249093
+    },
+    {
+      "seed": 409,
+      "candidate_id": 54,
+      "loss_name": "BCEDiceLoss",
+      "ckpt_last_path": "seg_phase6/final_retrain90/trial_54/seed_409/last.pth",
+      "test_loss": 0.06611970987731376,
+      "test_soft_dice": 0.7124709426789685,
+      "test_hard_dice@0.5": 0.899417963217845,
+      "test_soft_iou": 0.6755524010151889,
+      "test_hard_iou@0.5": 0.8685830613575151,
+      "test_precision@0.5": 0.9253382926915599,
+      "test_recall@0.5": 0.9329667653024724
+    },
+    {
+      "seed": 457,
+      "candidate_id": 54,
+      "loss_name": "BCEDiceLoss",
+      "ckpt_last_path": "seg_phase6/final_retrain90/trial_54/seed_457/last.pth",
+      "test_loss": 0.06536180208214616,
+      "test_soft_dice": 0.7074475352017753,
+      "test_hard_dice@0.5": 0.9028829861742206,
+      "test_soft_iou": 0.6701871179096994,
+      "test_hard_iou@0.5": 0.8716579756061588,
+      "test_precision@0.5": 0.9309951141872237,
+      "test_recall@0.5": 0.9306979066713721
+    },
+    {
+      "seed": 521,
+      "candidate_id": 54,
+      "loss_name": "BCEDiceLoss",
+      "ckpt_last_path": "seg_phase6/final_retrain90/trial_54/seed_521/last.pth",
+      "test_loss": 0.06477823520919918,
+      "test_soft_dice": 0.7170064955119011,
+      "test_hard_dice@0.5": 0.9002806301876507,
+      "test_soft_iou": 0.6788369638611258,
+      "test_hard_iou@0.5": 0.8687482855594264,
+      "test_precision@0.5": 0.9298276179659684,
+      "test_recall@0.5": 0.9282855044845986
+    },
+    {
+      "seed": 601,
+      "candidate_id": 54,
+      "loss_name": "BCEDiceLoss",
+      "ckpt_last_path": "seg_phase6/final_retrain90/trial_54/seed_601/last.pth",
+      "test_loss": 0.06594692109169158,
+      "test_soft_dice": 0.7187375608890985,
+      "test_hard_dice@0.5": 0.8999321537313208,
+      "test_soft_iou": 0.6805571655737879,
+      "test_hard_iou@0.5": 0.8684059780677863,
+      "test_precision@0.5": 0.9280533987019969,
+      "test_recall@0.5": 0.9304066518977681
+    },
+    {
+      "seed": 701,
+      "candidate_id": 54,
+      "loss_name": "BCEDiceLoss",
+      "ckpt_last_path": "seg_phase6/final_retrain90/trial_54/seed_701/last.pth",
+      "test_loss": 0.06620955248322107,
+      "test_soft_dice": 0.7184481412132757,
+      "test_hard_dice@0.5": 0.8934948117121131,
+      "test_soft_iou": 0.6805464067639767,
+      "test_hard_iou@0.5": 0.8624522243558833,
+      "test_precision@0.5": 0.9199014465998759,
+      "test_recall@0.5": 0.9321536447516585
+    },
+    {
+      "seed": 809,
+      "candidate_id": 54,
+      "loss_name": "BCEDiceLoss",
+      "ckpt_last_path": "seg_phase6/final_retrain90/trial_54/seed_809/last.pth",
+      "test_loss": 0.06348008587033348,
+      "test_soft_dice": 0.7127919067125932,
+      "test_hard_dice@0.5": 0.8978524846735254,
+      "test_soft_iou": 0.6752167090292261,
+      "test_hard_iou@0.5": 0.8669514817896142,
+      "test_precision@0.5": 0.9290234645911023,
+      "test_recall@0.5": 0.9289922936405756
+    },
+    {
+      "seed": 907,
+      "candidate_id": 54,
+      "loss_name": "BCEDiceLoss",
+      "ckpt_last_path": "seg_phase6/final_retrain90/trial_54/seed_907/last.pth",
+      "test_loss": 0.0,
+      "test_soft_dice": 0.0,
+      "test_hard_dice@0.5": 0.0,
+      "test_soft_iou": 0.0,
+      "test_hard_iou@0.5": 0.0,
+      "test_precision@0.5": 0.0,
+      "test_recall@0.5": 0.0
+    },
+    {
+      "seed": 997,
+      "candidate_id": 54,
+      "loss_name": "BCEDiceLoss",
+      "ckpt_last_path": "seg_phase6/final_retrain90/trial_54/seed_997/last.pth",
+      "test_loss": 0.06392692962578968,
+      "test_soft_dice": 0.7124694607439822,
+      "test_hard_dice@0.5": 0.9052008683069618,
+      "test_soft_iou": 0.674852605090864,
+      "test_hard_iou@0.5": 0.8742069489555021,
+      "test_precision@0.5": 0.9346542910558987,
+      "test_recall@0.5": 0.9296799519631715
     }
   ],
   "artifacts": {
-    "per_seed_csv": "seg_phase6/final_retrain90\\phase6_test_per_seed.csv"
+    "per_seed_csv": "seg_phase6/final_retrain90/phase6_test_per_seed.csv"
   },
   "metrics_test": {
     "soft_dice": {
-      "mean": 0.7147327415166439,
-      "std": 0.002635225246670814
+      "mean": 0.6790197819246523,
+      "std": 0.15580887507382032
     },
     "hard_dice@0.5": {
-      "mean": 0.8971049546963346,
-      "std": 0.0037694208395341756
+      "mean": 0.8534714557523221,
+      "std": 0.19583514784746014
     },
     "soft_iou": {
-      "mean": 0.6770379476480648,
-      "std": 0.0024137225925688088
+      "mean": 0.6432575110148605,
+      "std": 0.1476012134160252
     },
     "hard_iou@0.5": {
-      "mean": 0.8658694191865162,
-      "std": 0.003796886190573205
+      "mean": 0.8238328736851701,
+      "std": 0.18903764996949415
     },
     "precision@0.5": {
-      "mean": 0.926804937320473,
-      "std": 0.004874960923000379
+      "mean": 0.8812833012637838,
+      "std": 0.20222849100661447
     },
     "recall@0.5": {
-      "mean": 0.9293665035003055,
-      "std": 0.0010484685144513388
+      "mean": 0.8833121163444182,
+      "std": 0.20265047835054695
     },
     "loss": {
-      "mean": 0.06542461595519454,
-      "std": 0.0005762158914942036
+      "mean": 0.06206041907143276,
+      "std": 0.014260203531833588
     }
   }
 }
