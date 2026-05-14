@@ -7,6 +7,7 @@
   "uses_simclr_phase5_winner_params": true,
   "phase5_recipe_source": "seg_phase5/topk_retrain/phase5_winner.json",
   "test_policy": "locked_box_test_after_training",
+  "timestamp": "2026-05-14T00:48:00.420814",
   "data": {
     "train": "train+valid (90%)",
     "test": "test",
@@ -17,9 +18,59 @@
     "seeds": [
       13,
       37,
-      71
+      71,
+      101,
+      131,
+      151,
+      181,
+      211,
+      241,
+      271
     ],
-    "save": "LAST only"
+    "save": "LAST only",
+    "resume_existing": true,
+    "overwrite_existing_seeds": false
+  },
+  "seed_status": {
+    "requested_seeds": [
+      13,
+      37,
+      71,
+      101,
+      131,
+      151,
+      181,
+      211,
+      241,
+      271
+    ],
+    "completed_seeds": [
+      13,
+      37,
+      71,
+      101,
+      131,
+      151,
+      181,
+      211,
+      241,
+      271
+    ],
+    "skipped_existing_seeds": [],
+    "newly_trained_seeds": [
+      13,
+      37,
+      71,
+      101,
+      131,
+      151,
+      181,
+      211,
+      241,
+      271
+    ],
+    "resume_existing": true,
+    "overwrite_existing_seeds": false
   },
   "winner_source": {
     "phase5_winner_json": "seg_phase5/topk_retrain/phase5_winner.json",
@@ -31,78 +82,169 @@
     "encoder_init": "random",
     "simclr_pretraining_loaded": false
   },
-  "metrics_test": {
-    "soft_dice": {
-      "mean": 0.7062762978782872,
-      "std": 0.004665777244840746
-    },
-    "hard_dice@0.5": {
-      "mean": 0.8901325739520137,
-      "std": 0.002293836636953195
-    },
-    "soft_iou": {
-      "mean": 0.6679033742412089,
-      "std": 0.004377383590034729
-    },
-    "hard_iou@0.5": {
-      "mean": 0.8587218035287211,
-      "std": 0.0022522344127496284
-    },
-    "precision@0.5": {
-      "mean": 0.9190011049723555,
-      "std": 0.0023866235863027286
-    },
-    "recall@0.5": {
-      "mean": 0.9289603734297738,
-      "std": 0.00023020690452195787
-    },
-    "loss": {
-      "mean": 0.06715567785466316,
-      "std": 0.00031391465484163013
-    }
-  },
   "runs": [
     {
-      "seed": "13",
-      "candidate_id": "54",
+      "seed": 13,
+      "candidate_id": 54,
       "loss_name": "BCEDiceLoss",
-      "test_loss": "0.06671174976941759",
-      "test_soft_dice": "0.699695026900916",
-      "test_hard_dice@0.5": "0.8924843647416714",
-      "test_soft_iou": "0.6617128415682675",
-      "test_hard_iou@0.5": "0.8609135820380355",
-      "test_precision@0.5": "0.9216661011012255",
-      "test_recall@0.5": "0.9292701518641109",
-      "ckpt_last_path": "seg_phase6/final_retrain90_fixed_recipe_no_simclr\\trial_54\\seed_13\\last.pth"
+      "ckpt_last_path": "seg_phase6/final_retrain90_fixed_recipe_no_simclr/trial_54/seed_13/last.pth",
+      "test_loss": 0.06647473887004683,
+      "test_soft_dice": 0.7135536108515431,
+      "test_hard_dice@0.5": 0.8972757030166356,
+      "test_soft_iou": 0.6754779354654319,
+      "test_hard_iou@0.5": 0.8660575283101175,
+      "test_precision@0.5": 0.9261631514540816,
+      "test_recall@0.5": 0.9295898591733612
     },
     {
-      "seed": "37",
-      "candidate_id": "54",
+      "seed": 37,
+      "candidate_id": 54,
       "loss_name": "BCEDiceLoss",
-      "test_loss": "0.0673807252613844",
-      "test_soft_dice": "0.7099784794634423",
-      "test_hard_dice@0.5": "0.8870216488838196",
-      "test_soft_iou": "0.6709841643768338",
-      "test_hard_iou@0.5": "0.8556244348213736",
-      "test_precision@0.5": "0.9158749221700483",
-      "test_recall@0.5": "0.9288922068714041",
-      "ckpt_last_path": "seg_phase6/final_retrain90_fixed_recipe_no_simclr\\trial_54\\seed_37\\last.pth"
+      "ckpt_last_path": "seg_phase6/final_retrain90_fixed_recipe_no_simclr/trial_54/seed_37/last.pth",
+      "test_loss": 0.0663546345613699,
+      "test_soft_dice": 0.7129941356643639,
+      "test_hard_dice@0.5": 0.8964731017045215,
+      "test_soft_iou": 0.6749502624835061,
+      "test_hard_iou@0.5": 0.8653251864635839,
+      "test_precision@0.5": 0.925226985817462,
+      "test_recall@0.5": 0.9295853018549691
     },
     {
       "seed": 71,
       "candidate_id": 54,
       "loss_name": "BCEDiceLoss",
-      "ckpt_last_path": "seg_phase6/final_retrain90_fixed_recipe_no_simclr\\trial_54\\seed_71\\last.pth",
-      "test_loss": 0.06737455853318747,
-      "test_soft_dice": 0.7091553872705033,
-      "test_hard_dice@0.5": 0.8908917082305503,
-      "test_soft_iou": 0.6710131167785256,
-      "test_hard_iou@0.5": 0.859627393726754,
-      "test_precision@0.5": 0.9194622916457927,
-      "test_recall@0.5": 0.9287187615538065
+      "ckpt_last_path": "seg_phase6/final_retrain90_fixed_recipe_no_simclr/trial_54/seed_71/last.pth",
+      "test_loss": 0.06592408705074175,
+      "test_soft_dice": 0.7124519246183666,
+      "test_hard_dice@0.5": 0.8976055199066094,
+      "test_soft_iou": 0.6745351487826721,
+      "test_hard_iou@0.5": 0.866540815070667,
+      "test_precision@0.5": 0.9287102023690148,
+      "test_recall@0.5": 0.928301652891446
+    },
+    {
+      "seed": 101,
+      "candidate_id": 54,
+      "loss_name": "BCEDiceLoss",
+      "ckpt_last_path": "seg_phase6/final_retrain90_fixed_recipe_no_simclr/trial_54/seed_101/last.pth",
+      "test_loss": 0.06625774227412401,
+      "test_soft_dice": 0.7150882918526114,
+      "test_hard_dice@0.5": 0.894083889016008,
+      "test_soft_iou": 0.6765565775829343,
+      "test_hard_iou@0.5": 0.8629593256089539,
+      "test_precision@0.5": 0.9229368803775416,
+      "test_recall@0.5": 0.9297526414837457
+    },
+    {
+      "seed": 131,
+      "candidate_id": 54,
+      "loss_name": "BCEDiceLoss",
+      "ckpt_last_path": "seg_phase6/final_retrain90_fixed_recipe_no_simclr/trial_54/seed_131/last.pth",
+      "test_loss": 0.06550571490705541,
+      "test_soft_dice": 0.7048337677661825,
+      "test_hard_dice@0.5": 0.8909685556445501,
+      "test_soft_iou": 0.6669431944751898,
+      "test_hard_iou@0.5": 0.8597477525947368,
+      "test_precision@0.5": 0.9190885833512366,
+      "test_recall@0.5": 0.92927347444855
+    },
+    {
+      "seed": 151,
+      "candidate_id": 54,
+      "loss_name": "BCEDiceLoss",
+      "ckpt_last_path": "seg_phase6/final_retrain90_fixed_recipe_no_simclr/trial_54/seed_151/last.pth",
+      "test_loss": 0.0675326348775256,
+      "test_soft_dice": 0.7024328572467893,
+      "test_hard_dice@0.5": 0.8967521896826482,
+      "test_soft_iou": 0.6648882426703926,
+      "test_hard_iou@0.5": 0.8655298990274952,
+      "test_precision@0.5": 0.9297142639202354,
+      "test_recall@0.5": 0.927165138826961
+    },
+    {
+      "seed": 181,
+      "candidate_id": 54,
+      "loss_name": "BCEDiceLoss",
+      "ckpt_last_path": "seg_phase6/final_retrain90_fixed_recipe_no_simclr/trial_54/seed_181/last.pth",
+      "test_loss": 0.065788596388513,
+      "test_soft_dice": 0.7184447587090256,
+      "test_hard_dice@0.5": 0.8925762559249337,
+      "test_soft_iou": 0.6792639132945147,
+      "test_hard_iou@0.5": 0.8612511332056164,
+      "test_precision@0.5": 0.9228957796518782,
+      "test_recall@0.5": 0.9283378530181615
+    },
+    {
+      "seed": 211,
+      "candidate_id": 54,
+      "loss_name": "BCEDiceLoss",
+      "ckpt_last_path": "seg_phase6/final_retrain90_fixed_recipe_no_simclr/trial_54/seed_211/last.pth",
+      "test_loss": 0.06692969985240328,
+      "test_soft_dice": 0.714482611887223,
+      "test_hard_dice@0.5": 0.8921256084990712,
+      "test_soft_iou": 0.6762380273844553,
+      "test_hard_iou@0.5": 0.8610306204736761,
+      "test_precision@0.5": 0.9215855884130022,
+      "test_recall@0.5": 0.9284184234543185
+    },
+    {
+      "seed": 241,
+      "candidate_id": 54,
+      "loss_name": "BCEDiceLoss",
+      "ckpt_last_path": "seg_phase6/final_retrain90_fixed_recipe_no_simclr/trial_54/seed_241/last.pth",
+      "test_loss": 0.06650861737211193,
+      "test_soft_dice": 0.7125314869276718,
+      "test_hard_dice@0.5": 0.8956721663053057,
+      "test_soft_iou": 0.6748863389415551,
+      "test_hard_iou@0.5": 0.8644402694069179,
+      "test_precision@0.5": 0.9269021160201689,
+      "test_recall@0.5": 0.9274947303375312
+    },
+    {
+      "seed": 271,
+      "candidate_id": 54,
+      "loss_name": "BCEDiceLoss",
+      "ckpt_last_path": "seg_phase6/final_retrain90_fixed_recipe_no_simclr/trial_54/seed_271/last.pth",
+      "test_loss": 0.06443685026295418,
+      "test_soft_dice": 0.7177536241472823,
+      "test_hard_dice@0.5": 0.8958370488934813,
+      "test_soft_iou": 0.6798865390173365,
+      "test_hard_iou@0.5": 0.8650303262102921,
+      "test_precision@0.5": 0.9274346297821112,
+      "test_recall@0.5": 0.928133655290688
     }
   ],
   "artifacts": {
-    "per_seed_csv": "seg_phase6/final_retrain90_fixed_recipe_no_simclr\\phase6_test_per_seed_fixed_recipe_no_simclr.csv"
+    "per_seed_csv": "seg_phase6/final_retrain90_fixed_recipe_no_simclr/phase6_test_per_seed_fixed_recipe_no_simclr.csv"
+  },
+  "metrics_test": {
+    "soft_dice": {
+      "mean": 0.712456706967106,
+      "std": 0.004847968986685959
+    },
+    "hard_dice@0.5": {
+      "mean": 0.8949370038593765,
+      "std": 0.0022259603218015276
+    },
+    "soft_iou": {
+      "mean": 0.6743626180097988,
+      "std": 0.004577903023117929
+    },
+    "hard_iou@0.5": {
+      "mean": 0.8637912856372056,
+      "std": 0.0022614986441326945
+    },
+    "precision@0.5": {
+      "mean": 0.9250658181156732,
+      "std": 0.0031966190922986205
+    },
+    "recall@0.5": {
+      "mean": 0.9286052730779732,
+      "std": 0.0008614603982577657
+    },
+    "loss": {
+      "mean": 0.0661713316416846,
+      "std": 0.0007958794295135265
+    }
   }
 }
