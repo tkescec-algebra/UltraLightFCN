@@ -3,6 +3,7 @@ wandb/
 .vscode/
 .venv/
 __pycache__/
+checkpoints/
 logs/
 aug_ablation/fig3_simclr_outputs/
 aug_ablation/logs/
