@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import csv
 import json
+import os
+import tempfile
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from statistics import mean, pstdev
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Iterator, List, Tuple
 
 import torch
 from torch.amp import GradScaler, autocast
@@ -46,6 +50,20 @@ DEFAULT_ABLATION_VARIANTS: tuple[str, ...] = (
     "decoder_narrow",
     "decoder_wide",
 )
+SHARD_VARIANTS: dict[str, tuple[str, ...]] = {
+    "all": DEFAULT_ABLATION_VARIANTS,
+    "part1": (
+        "no_mini_aspp",
+        "no_shifted_sa",
+        "no_mini_aspp_no_sa",
+        "no_shallow_skip",
+    ),
+    "part2": (
+        "no_dilation",
+        "decoder_narrow",
+        "decoder_wide",
+    ),
+}
 PHASE6_BASELINE_REFERENCE_DIR = REPO_ROOT / "train" / "seg_phase6" / "final_retrain90" / "trial_54"
 
 
@@ -88,6 +106,7 @@ class AblationStage2Config:
     test_metrics_name: str = "test_metrics.json"
     seed_csv_name: str = "arch_ablation_stage2_test_per_seed.csv"
     report_json_name: str = "arch_ablation_stage2_test_report.json"
+    report_lock_name: str = "arch_ablation_stage2_report.lock"
 
 
 STAGE2_REQUIRED_ROW_FIELDS: tuple[str, ...] = (
@@ -110,6 +129,7 @@ STAGE2_REQUIRED_ROW_FIELDS: tuple[str, ...] = (
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", type=str, default=None)
+    parser.add_argument("--shard", type=str, default="all", choices=tuple(SHARD_VARIANTS.keys()))
     return parser.parse_args()
 
 
@@ -407,27 +427,141 @@ def _read_completed_seed_row(
     return dict(metrics)
 
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_name = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            newline="",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as f:
+            tmp_name = f.name
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, path)
+    finally:
+        if tmp_name:
+            try:
+                Path(tmp_name).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _atomic_save_json(path: Path, obj: Dict[str, Any]) -> None:
+    _atomic_write_text(path, json.dumps(obj, indent=2, sort_keys=True) + "\n")
+
+
+def _atomic_save_csv_rows(
+    path: Path,
+    rows: List[Dict[str, Any]],
+    *,
+    fieldnames: List[str],
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_name = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            newline="",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as f:
+            tmp_name = f.name
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow({field: row.get(field, "") for field in fieldnames})
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, path)
+    finally:
+        if tmp_name:
+            try:
+                Path(tmp_name).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+@contextmanager
+def _stage_report_lock(cfg: AblationStage2Config) -> Iterator[None]:
+    lock_path = cfg.out_root / cfg.report_lock_name
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd: int | None = None
+    deadline = time.monotonic() + 3600.0
+    while fd is None:
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            try:
+                os.write(
+                    fd,
+                    f"pid={os.getpid()} acquired={datetime.now().isoformat()}\n".encode("utf-8"),
+                )
+            except OSError:
+                os.close(fd)
+                fd = None
+                lock_path.unlink(missing_ok=True)
+                raise
+        except FileExistsError:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Timed out waiting for stage report lock: {lock_path}")
+            time.sleep(0.25)
+
+    try:
+        yield
+    finally:
+        if fd is not None:
+            os.close(fd)
+        try:
+            lock_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _collect_completed_seed_rows_from_disk(cfg: AblationStage2Config) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for variant_name in DEFAULT_ABLATION_VARIANTS:
+        for seed in cfg.seeds:
+            completed_row = _read_completed_seed_row(cfg, variant_name=variant_name, seed=seed)
+            if completed_row is not None:
+                rows.append(completed_row)
+    return rows
+
+
 def _refresh_stage_outputs(
     cfg: AblationStage2Config,
     *,
     winner_params: Dict[str, Any],
     phase3_last_ckpt: Path,
-    seed_rows: List[Dict[str, Any]],
+    shard: str,
+    active_variants: Tuple[str, ...],
 ) -> None:
-    save_csv_rows(
-        str(cfg.out_root / cfg.seed_csv_name),
-        seed_rows,
-        fieldnames=list(STAGE2_REQUIRED_ROW_FIELDS),
-    )
-    save_json(
-        str(cfg.out_root / cfg.report_json_name),
-        _build_stage_report(
-            cfg,
-            winner_params=winner_params,
-            phase3_last_ckpt=phase3_last_ckpt,
-            seed_rows=seed_rows,
-        ),
-    )
+    with _stage_report_lock(cfg):
+        seed_rows = _collect_completed_seed_rows_from_disk(cfg)
+        _atomic_save_csv_rows(
+            cfg.out_root / cfg.seed_csv_name,
+            seed_rows,
+            fieldnames=list(STAGE2_REQUIRED_ROW_FIELDS),
+        )
+        _atomic_save_json(
+            cfg.out_root / cfg.report_json_name,
+            _build_stage_report(
+                cfg,
+                winner_params=winner_params,
+                phase3_last_ckpt=phase3_last_ckpt,
+                seed_rows=seed_rows,
+                shard=shard,
+                active_variants=active_variants,
+            ),
+        )
 
 
 def run_one_variant_seed(
@@ -598,9 +732,11 @@ def _build_stage_report(
     winner_params: Dict[str, Any],
     phase3_last_ckpt: Path,
     seed_rows: List[Dict[str, Any]],
+    shard: str,
+    active_variants: Tuple[str, ...],
 ) -> Dict[str, Any]:
     aggregate: Dict[str, Any] = {}
-    for variant_name in cfg.variants:
+    for variant_name in DEFAULT_ABLATION_VARIANTS:
         rows = [row for row in seed_rows if row["variant_name"] == variant_name]
         if not rows:
             continue
@@ -650,7 +786,16 @@ def _build_stage_report(
             "save": "LAST only",
             "scheduler": {"name": "CosineAnnealingLR", "eta_min": cfg.lr_min, "T_max": cfg.epochs},
         },
-        "variants": list(cfg.variants),
+        "variants": list(DEFAULT_ABLATION_VARIANTS),
+        "sharding": {
+            "shard": shard,
+            "default_full_variant_list": list(DEFAULT_ABLATION_VARIANTS),
+            "active_variant_list": list(active_variants),
+            "note": (
+                "Shared stage-level reports are rebuilt from completed per-seed artifacts on disk. "
+                "Variants with no completed rows yet are omitted from aggregate."
+            ),
+        },
         "per_seed": seed_rows,
         "aggregate": aggregate,
     }
@@ -659,7 +804,11 @@ def _build_stage_report(
 def main() -> None:
     args = _parse_args()
     base_cfg = AblationStage2Config()
-    cfg = AblationStage2Config(device=_resolve_device(args.device, base_cfg.device))
+    active_variants = SHARD_VARIANTS[args.shard]
+    cfg = AblationStage2Config(
+        device=_resolve_device(args.device, base_cfg.device),
+        variants=active_variants,
+    )
     cfg.out_root.mkdir(parents=True, exist_ok=True)
 
     winner_obj = _read_json(cfg.phase5_winner_json)
@@ -670,28 +819,26 @@ def main() -> None:
     phase3_last_ckpt = _resolve_phase3_ckpt(cfg, winner_obj)
     _validate_required_paths(cfg, phase3_last_ckpt)
 
-    seed_rows: List[Dict[str, Any]] = []
     for variant_name in cfg.variants:
         for seed in cfg.seeds:
             completed_row = _read_completed_seed_row(cfg, variant_name=variant_name, seed=seed)
             if completed_row is not None:
                 print(f"[resume] Skipping completed run: variant={variant_name} seed={seed}")
-                row = completed_row
             else:
                 print(f"[resume] Rerunning incomplete run: variant={variant_name} seed={seed}")
-                row = run_one_variant_seed(
+                run_one_variant_seed(
                     cfg,
                     variant_name=variant_name,
                     winner_params=winner_params,
                     phase3_last_ckpt=phase3_last_ckpt,
                     seed=seed,
                 )
-            seed_rows.append(row)
             _refresh_stage_outputs(
                 cfg,
                 winner_params=winner_params,
                 phase3_last_ckpt=phase3_last_ckpt,
-                seed_rows=seed_rows,
+                shard=args.shard,
+                active_variants=active_variants,
             )
             clear_cuda_cache()
 
