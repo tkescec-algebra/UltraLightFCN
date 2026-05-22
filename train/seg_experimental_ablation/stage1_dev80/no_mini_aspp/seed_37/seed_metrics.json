@@ -1,0 +1,15 @@
+{
+  "variant_name": "no_mini_aspp",
+  "seed": 37,
+  "status": "ok",
+  "loss_name": "BCEDiceLoss",
+  "best_avg_last_k_soft": 0.7463965980319822,
+  "best_epoch": 30,
+  "best_val_soft": 0.7470052737230357,
+  "best_val_hard05": 0.8731589058106252,
+  "final_val_loss": 0.06797811563355298,
+  "final_val_soft": 0.7470052737230357,
+  "final_val_hard05": 0.8731589058106252,
+  "ckpt_last_path": "/home/aarhus/PycharmProjects/UltraLightFCN/train/seg_experimental_ablation/stage1_dev80/no_mini_aspp/seed_37/last.pth",
+  "simclr_load_audit_path": "/home/aarhus/PycharmProjects/UltraLightFCN/train/seg_experimental_ablation/stage1_dev80/no_mini_aspp/seed_37/simclr_load_audit.json"
+}

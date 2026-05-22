@@ -1,0 +1,15 @@
+{
+  "variant_name": "no_shifted_sa",
+  "seed": 71,
+  "status": "ok",
+  "loss_name": "BCEDiceLoss",
+  "best_avg_last_k_soft": 0.7410223727672748,
+  "best_epoch": 29,
+  "best_val_soft": 0.7467316543633656,
+  "best_val_hard05": 0.9135009831697595,
+  "final_val_loss": 0.06435409324595048,
+  "final_val_soft": 0.7338180402711264,
+  "final_val_hard05": 0.9081417837206629,
+  "ckpt_last_path": "/home/aarhus/PycharmProjects/UltraLightFCN/train/seg_experimental_ablation/stage1_dev80/no_shifted_sa/seed_71/last.pth",
+  "simclr_load_audit_path": "/home/aarhus/PycharmProjects/UltraLightFCN/train/seg_experimental_ablation/stage1_dev80/no_shifted_sa/seed_71/simclr_load_audit.json"
+}
