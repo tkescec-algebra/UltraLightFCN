@@ -1,0 +1,15 @@
+{
+  "variant_name": "decoder_narrow",
+  "seed": 37,
+  "status": "ok",
+  "loss_name": "BCEDiceLoss",
+  "dice_soft": 0.7199884914323292,
+  "dice_hard05": 0.9019617840674071,
+  "iou_soft": 0.6820733831519574,
+  "iou_hard05": 0.8709834395467707,
+  "precision_hard05": 0.9335038111695146,
+  "recall_hard05": 0.9282407533805982,
+  "n": 2825.0,
+  "ckpt_last_path": "/home/aarhus/PycharmProjects/UltraLightFCN/train/seg_experimental_ablation/stage2_final90_test/decoder_narrow/seed_37/last.pth",
+  "simclr_load_audit_path": "/home/aarhus/PycharmProjects/UltraLightFCN/train/seg_experimental_ablation/stage2_final90_test/decoder_narrow/seed_37/simclr_load_audit.json"
+}

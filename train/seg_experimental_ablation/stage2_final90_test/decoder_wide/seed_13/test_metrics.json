@@ -1,0 +1,15 @@
+{
+  "variant_name": "decoder_wide",
+  "seed": 13,
+  "status": "ok",
+  "loss_name": "BCEDiceLoss",
+  "dice_soft": 0.7024950262917354,
+  "dice_hard05": 0.8968459835305678,
+  "iou_soft": 0.6647749158100481,
+  "iou_hard05": 0.8658314341570423,
+  "precision_hard05": 0.9254513807212357,
+  "recall_hard05": 0.9297648509835775,
+  "n": 2825.0,
+  "ckpt_last_path": "/home/aarhus/PycharmProjects/UltraLightFCN/train/seg_experimental_ablation/stage2_final90_test/decoder_wide/seed_13/last.pth",
+  "simclr_load_audit_path": "/home/aarhus/PycharmProjects/UltraLightFCN/train/seg_experimental_ablation/stage2_final90_test/decoder_wide/seed_13/simclr_load_audit.json"
+}

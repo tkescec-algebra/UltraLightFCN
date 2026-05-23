@@ -1,0 +1,15 @@
+{
+  "variant_name": "no_shallow_skip",
+  "seed": 71,
+  "status": "ok",
+  "loss_name": "BCEDiceLoss",
+  "dice_soft": 0.7027949095431683,
+  "dice_hard05": 0.8987844319470161,
+  "iou_soft": 0.6649378254218439,
+  "iou_hard05": 0.8673001545298415,
+  "precision_hard05": 0.929850622637082,
+  "recall_hard05": 0.9284889261068496,
+  "n": 2825.0,
+  "ckpt_last_path": "/home/aarhus/PycharmProjects/UltraLightFCN/train/seg_experimental_ablation/stage2_final90_test/no_shallow_skip/seed_71/last.pth",
+  "simclr_load_audit_path": "/home/aarhus/PycharmProjects/UltraLightFCN/train/seg_experimental_ablation/stage2_final90_test/no_shallow_skip/seed_71/simclr_load_audit.json"
+}

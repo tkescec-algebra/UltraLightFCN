@@ -1,0 +1,15 @@
+{
+  "variant_name": "no_dilation",
+  "seed": 37,
+  "status": "ok",
+  "loss_name": "BCEDiceLoss",
+  "dice_soft": 0.7194214181087714,
+  "dice_hard05": 0.886587221580269,
+  "iou_soft": 0.6824666633067933,
+  "iou_hard05": 0.856112151356925,
+  "precision_hard05": 0.9110347417814542,
+  "recall_hard05": 0.9353813942976758,
+  "n": 2825.0,
+  "ckpt_last_path": "/home/aarhus/PycharmProjects/UltraLightFCN/train/seg_experimental_ablation/stage2_final90_test/no_dilation/seed_37/last.pth",
+  "simclr_load_audit_path": "/home/aarhus/PycharmProjects/UltraLightFCN/train/seg_experimental_ablation/stage2_final90_test/no_dilation/seed_37/simclr_load_audit.json"
+}
