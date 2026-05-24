@@ -1,9 +1,0 @@
-scheme_id,label,w_D,w_L,w_M,w_P
-W1,Primary,0.55,0.25,0.15,0.05
-W2,Latency-up,0.5,0.3,0.15,0.05
-W3,Accuracy-up,0.6,0.2,0.15,0.05
-W4,Memory-up,0.55,0.2,0.2,0.05
-W5,Balanced-alt,0.5,0.25,0.2,0.05
-W6,Accuracy-heavy,0.65,0.15,0.15,0.05
-W7,Latency-heavy,0.45,0.35,0.15,0.05
-W8,Memory-heavy,0.5,0.2,0.25,0.05

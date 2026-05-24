@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import os
+import csv
+import math
 import traceback
 from dataclasses import dataclass
 from datetime import datetime
-from statistics import mean, pstdev
 from typing import Any, Dict, List, Tuple
 
 import torch
@@ -27,6 +28,28 @@ from utils.sota_registry_extension import (
     SOTA_EXTENSION_MODELS,
     SOTA_REGIMES,
     split_smp_encoder_decoder_params,
+)
+
+
+TEST_METRIC_KEYS: Tuple[str, ...] = (
+    "dice_soft",
+    "dice_hard05",
+    "iou_soft",
+    "iou_hard05",
+    "precision_hard05",
+    "recall_hard05",
+)
+
+CSV_TEST_METRIC_KEYS: Tuple[str, ...] = tuple(f"test_{k}" for k in TEST_METRIC_KEYS)
+SEED_CSV_FIELDNAMES: Tuple[str, ...] = (
+    "model_name",
+    "regime",
+    "seed",
+    "status",
+    *CSV_TEST_METRIC_KEYS,
+    "last_ckpt",
+    "error",
+    "trace_path",
 )
 
 
@@ -78,6 +101,83 @@ def _read_json(path: str) -> Dict[str, Any]:
 
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def _finite_float(value: Any) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _test_metrics_are_finite(metrics: Dict[str, Any]) -> bool:
+    return all(_finite_float(metrics.get(k)) for k in TEST_METRIC_KEYS)
+
+
+def _read_existing_seed_csv(path: str) -> List[Dict[str, Any]]:
+    if not os.path.isfile(path):
+        return []
+
+    with open(path, "r", newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def _row_key(row: Dict[str, Any]) -> Tuple[str, str, int]:
+    return (str(row["model_name"]), str(row["regime"]), int(row["seed"]))
+
+
+def _csv_row_has_valid_completed_run(row: Dict[str, Any]) -> bool:
+    if row.get("status") != "ok":
+        return False
+
+    last_ckpt = row.get("last_ckpt", "")
+    if not last_ckpt or not os.path.isfile(last_ckpt):
+        return False
+
+    return all(_finite_float(row.get(k)) for k in CSV_TEST_METRIC_KEYS)
+
+
+def _seed_result_from_valid_csv_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "model_name": row["model_name"],
+        "regime": row["regime"],
+        "seed": int(row["seed"]),
+        "status": "ok",
+        "last_ckpt": row["last_ckpt"],
+        "test": {k: float(row[f"test_{k}"]) for k in TEST_METRIC_KEYS},
+    }
+
+
+def _seed_result_to_csv_row(r: Dict[str, Any]) -> Dict[str, Any]:
+    base = {"model_name": r["model_name"], "regime": r["regime"], "seed": r["seed"], "status": r["status"]}
+    if r["status"] == "ok":
+        base.update(
+            {
+                "test_dice_soft": r["test"]["dice_soft"],
+                "test_dice_hard05": r["test"]["dice_hard05"],
+                "test_iou_soft": r["test"]["iou_soft"],
+                "test_iou_hard05": r["test"]["iou_hard05"],
+                "test_precision_hard05": r["test"]["precision_hard05"],
+                "test_recall_hard05": r["test"]["recall_hard05"],
+                "last_ckpt": r["last_ckpt"],
+            }
+        )
+    else:
+        base.update(
+            {
+                "error": r.get("error", ""),
+                "trace_path": r.get("trace_path", ""),
+                "last_ckpt": r.get("last_ckpt", ""),
+            }
+        )
+    return base
+
+
+def _population_std(vals: List[float]) -> float:
+    if len(vals) <= 1:
+        return 0.0
+    mu = sum(vals) / len(vals)
+    return math.sqrt(sum((v - mu) ** 2 for v in vals) / len(vals))
 
 
 def _build_train90_loader(cfg: SOTAExtensionStage2Config, batch_size: int, *, seed: int) -> DataLoader:
@@ -313,6 +413,17 @@ def train_one(
 
     # Locked-box TEST evaluation
     test_metrics = eval_test_failfast(model, test_loader, cfg)
+    if not _test_metrics_are_finite(test_metrics):
+        bad_keys = [k for k in TEST_METRIC_KEYS if not _finite_float(test_metrics.get(k))]
+        return {
+            "model_name": model_name,
+            "regime": regime_name,
+            "seed": seed,
+            "status": "failed_nonfinite_test_metric",
+            "last_ckpt": last_path,
+            "error": f"Non-finite TEST metric(s): {', '.join(bad_keys)}",
+            "test": test_metrics,
+        }
 
     return {
         "model_name": model_name,
@@ -329,11 +440,21 @@ def main() -> None:
     os.makedirs(cfg.out_root, exist_ok=True)
 
     phase5_winner = _read_json(cfg.phase5_winner_json)
+    seed_csv_path = os.path.join(cfg.out_root, cfg.seed_csv)
+    existing_rows = _read_existing_seed_csv(seed_csv_path)
+    existing_by_key = {_row_key(r): r for r in existing_rows if r.get("model_name") and r.get("regime") and r.get("seed")}
 
     seed_rows: List[Dict[str, Any]] = []
     for model_name in SOTA_EXTENSION_MODELS.keys():
         for regime_name in SOTA_EXTENSION_STAGE2_REGIMES:
             for seed in cfg.seeds:
+                key = (model_name, regime_name, seed)
+                existing_row = existing_by_key.get(key)
+                if existing_row is not None and _csv_row_has_valid_completed_run(existing_row):
+                    print(f"[SOTA Extension Stage2] Skip existing valid run: {model_name}/{regime_name}/seed_{seed}")
+                    seed_rows.append(_seed_result_from_valid_csv_row(existing_row))
+                    continue
+
                 try:
                     row = train_one(cfg, phase5_winner, model_name, regime_name, seed)
                 except Exception as e:
@@ -354,33 +475,16 @@ def main() -> None:
                 clear_cuda_cache()
 
     # Seed CSV (flatten key metrics)
-    csv_rows = []
-    for r in seed_rows:
-        base = {"model_name": r["model_name"], "regime": r["regime"], "seed": r["seed"], "status": r["status"]}
-        if r["status"] == "ok":
-            base.update(
-                {
-                    "test_dice_soft": r["test"]["dice_soft"],
-                    "test_dice_hard05": r["test"]["dice_hard05"],
-                    "test_iou_soft": r["test"]["iou_soft"],
-                    "test_iou_hard05": r["test"]["iou_hard05"],
-                    "test_precision_hard05": r["test"]["precision_hard05"],
-                    "test_recall_hard05": r["test"]["recall_hard05"],
-                    "last_ckpt": r["last_ckpt"],
-                }
-            )
-        else:
-            base.update({"error": r.get("error", ""), "trace_path": r.get("trace_path", "")})
-        csv_rows.append(base)
+    csv_rows = [_seed_result_to_csv_row(r) for r in seed_rows]
 
-    save_csv_rows(os.path.join(cfg.out_root, cfg.seed_csv), csv_rows)
+    save_csv_rows(seed_csv_path, csv_rows, fieldnames=SEED_CSV_FIELDNAMES)
 
     # Aggregated report by (model, regime)
     def agg(ok_rows: List[Dict[str, Any]], key: str) -> Dict[str, float]:
-        vals = [float(r["test"][key]) for r in ok_rows]
+        vals = [float(r["test"][key]) for r in ok_rows if _finite_float(r.get("test", {}).get(key))]
         if not vals:
             return {"mean": float("nan"), "std": float("nan"), "n": 0}
-        return {"mean": mean(vals), "std": pstdev(vals) if len(vals) > 1 else 0.0, "n": len(vals)}
+        return {"mean": sum(vals) / len(vals), "std": _population_std(vals), "n": len(vals)}
 
     report = {
         "timestamp": datetime.now().isoformat(),
@@ -394,7 +498,12 @@ def main() -> None:
             ok = [
                 r
                 for r in seed_rows
-                if r["model_name"] == model_name and r["regime"] == regime_name and r["status"] == "ok"
+                if (
+                    r["model_name"] == model_name
+                    and r["regime"] == regime_name
+                    and r["status"] == "ok"
+                    and _test_metrics_are_finite(r.get("test", {}))
+                )
             ]
             report["aggregate"][f"{model_name}::{regime_name}"] = {
                 "dice_soft": agg(ok, "dice_soft"),

@@ -10,9 +10,12 @@ seg_phase5/ablation/ablation_figures/
 seg_phase5/topk_retrain/
 seg_phase5/topk_retrain_no_simclr/
 seg_phase5/plots/
+seg_phase5/ablation/phase5.1_ablation_results.csv
+seg_phase5/ablation/phase5.1_ablation_report.json
 seg_phase6/final_retrain90/
 seg_phase6/final_retrain90_fixed_recipe_no_simclr/
 seg_phase6/wilcoxon_simulation_outputs/
 seg_phase6/analysis/
-seg_sota/stage1_dev80/
-seg_sota/stage2_final90_test
+seg_sota/
+seg_sota_extension/
+seg_experimental_ablation/
