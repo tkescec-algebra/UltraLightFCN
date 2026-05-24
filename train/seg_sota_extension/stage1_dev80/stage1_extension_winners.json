@@ -1,0 +1,119 @@
+{
+  "stage": 1,
+  "timestamp": "2026-05-24T12:45:40.539755",
+  "split": "train80/valid10",
+  "seeds_requested": [
+    13,
+    37,
+    71
+  ],
+  "selection_metric": "val_soft_dice(thr=None) with avg_last_k; select by mean(best_avg_last_k_soft)",
+  "tie_break": [
+    "min std(best_avg_last_k_soft)",
+    "max mean(best_val_soft)"
+  ],
+  "models": [
+    "unet_mobilenetv2",
+    "dlv3p_efficientnetb0",
+    "unet_efficientnetb0"
+  ],
+  "regimes": [
+    "minft"
+  ],
+  "audit_unified_recipe": {
+    "phase5_winner_json": "seg_phase5/topk_retrain/phase5_winner.json",
+    "batch_size": 16,
+    "base_lr": 0.0070438813370146194,
+    "enc_lr_mult_fullft": 0.28552323346401925,
+    "weight_decay": 7.55567801215137e-05,
+    "loss_name": null
+  },
+  "per_group_stats": {
+    "unet_mobilenetv2::minft": {
+      "model_name": "unet_mobilenetv2",
+      "regime": "minft",
+      "n_ok": 3,
+      "seeds_ok": [
+        13,
+        37,
+        71
+      ],
+      "mean_best_avg_last_k_soft": 0.7449057301178637,
+      "std_best_avg_last_k_soft": 0.0021409001449852905,
+      "mean_best_val_soft": 0.7531659174459413,
+      "mean_best_val_hard05": 0.9334749316499177
+    },
+    "dlv3p_efficientnetb0::minft": {
+      "model_name": "dlv3p_efficientnetb0",
+      "regime": "minft",
+      "n_ok": 3,
+      "seeds_ok": [
+        13,
+        37,
+        71
+      ],
+      "mean_best_avg_last_k_soft": 0.759189208842127,
+      "std_best_avg_last_k_soft": 0.0003010438950185299,
+      "mean_best_val_soft": 0.7600781164591015,
+      "mean_best_val_hard05": 0.9362558118621708
+    },
+    "unet_efficientnetb0::minft": {
+      "model_name": "unet_efficientnetb0",
+      "regime": "minft",
+      "n_ok": 3,
+      "seeds_ok": [
+        13,
+        37,
+        71
+      ],
+      "mean_best_avg_last_k_soft": 0.7529089767965891,
+      "std_best_avg_last_k_soft": 0.0003652590358001798,
+      "mean_best_val_soft": 0.7585028664226828,
+      "mean_best_val_hard05": 0.938153355003531
+    }
+  },
+  "per_model_winner": {
+    "unet_mobilenetv2": {
+      "winner_key": "unet_mobilenetv2::minft",
+      "winner_regime": "minft",
+      "n_ok": 3,
+      "seeds_ok": [
+        13,
+        37,
+        71
+      ],
+      "mean_best_avg_last_k_soft": 0.7449057301178637,
+      "std_best_avg_last_k_soft": 0.0021409001449852905,
+      "mean_best_val_soft": 0.7531659174459413,
+      "mean_best_val_hard05": 0.9334749316499177
+    },
+    "dlv3p_efficientnetb0": {
+      "winner_key": "dlv3p_efficientnetb0::minft",
+      "winner_regime": "minft",
+      "n_ok": 3,
+      "seeds_ok": [
+        13,
+        37,
+        71
+      ],
+      "mean_best_avg_last_k_soft": 0.759189208842127,
+      "std_best_avg_last_k_soft": 0.0003010438950185299,
+      "mean_best_val_soft": 0.7600781164591015,
+      "mean_best_val_hard05": 0.9362558118621708
+    },
+    "unet_efficientnetb0": {
+      "winner_key": "unet_efficientnetb0::minft",
+      "winner_regime": "minft",
+      "n_ok": 3,
+      "seeds_ok": [
+        13,
+        37,
+        71
+      ],
+      "mean_best_avg_last_k_soft": 0.7529089767965891,
+      "std_best_avg_last_k_soft": 0.0003652590358001798,
+      "mean_best_val_soft": 0.7585028664226828,
+      "mean_best_val_hard05": 0.938153355003531
+    }
+  }
+}

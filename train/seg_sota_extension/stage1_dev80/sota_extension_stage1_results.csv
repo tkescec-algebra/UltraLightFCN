@@ -1,0 +1,10 @@
+model_name,regime,seed,status,last_ckpt,best_avg_last_k_soft,best_val_soft,best_val_hard05
+unet_mobilenetv2,minft,13,ok,seg_sota_extension/stage1_dev80/unet_mobilenetv2/minft/seed_13/last.pth,0.7474864497615544,0.7538365060592984,0.9307969996547062
+unet_mobilenetv2,minft,37,ok,seg_sota_extension/stage1_dev80/unet_mobilenetv2/minft/seed_37/last.pth,0.742244204829454,0.7519967294025635,0.9344343633404957
+unet_mobilenetv2,minft,71,ok,seg_sota_extension/stage1_dev80/unet_mobilenetv2/minft/seed_71/last.pth,0.7449865357625824,0.7536645168759619,0.9351934319545511
+dlv3p_efficientnetb0,minft,13,ok,seg_sota_extension/stage1_dev80/dlv3p_efficientnetb0/minft/seed_13/last.pth,0.7589345013117534,0.7602971865914495,0.9346495550443016
+dlv3p_efficientnetb0,minft,37,ok,seg_sota_extension/stage1_dev80/dlv3p_efficientnetb0/minft/seed_37/last.pth,0.7590211236194159,0.7599986181046463,0.9365245660875795
+dlv3p_efficientnetb0,minft,71,ok,seg_sota_extension/stage1_dev80/dlv3p_efficientnetb0/minft/seed_71/last.pth,0.7596120015952117,0.7599385446812087,0.9375933144546311
+unet_efficientnetb0,minft,13,ok,seg_sota_extension/stage1_dev80/unet_efficientnetb0/minft/seed_13/last.pth,0.7524741627667442,0.7575236611164646,0.9398192487893399
+unet_efficientnetb0,minft,37,ok,seg_sota_extension/stage1_dev80/unet_efficientnetb0/minft/seed_37/last.pth,0.753367887050492,0.7600484537605183,0.9371890121787936
+unet_efficientnetb0,minft,71,ok,seg_sota_extension/stage1_dev80/unet_efficientnetb0/minft/seed_71/last.pth,0.752884880572531,0.7579364843910656,0.9374518040424595

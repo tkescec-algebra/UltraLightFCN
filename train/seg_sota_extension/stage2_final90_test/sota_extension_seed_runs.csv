@@ -1,0 +1,10 @@
+model_name,regime,seed,status,test_dice_soft,test_dice_hard05,test_iou_soft,test_iou_hard05,test_precision_hard05,test_recall_hard05,last_ckpt
+unet_mobilenetv2,minft,13,ok,0.7004137033857075,0.9281355910174615,0.6666458424497231,0.9003533339078448,0.9544977513245777,0.9417351873997039,seg_sota_extension/stage2_final90_test/unet_mobilenetv2/minft/seed_13/last.pth
+unet_mobilenetv2,minft,37,ok,0.6999029581763048,0.9311698707015114,0.6657921799166804,0.9032519703417753,0.9582739113706403,0.9409432962932418,seg_sota_extension/stage2_final90_test/unet_mobilenetv2/minft/seed_37/last.pth
+unet_mobilenetv2,minft,71,ok,0.6988177804899427,0.9285438852183586,0.6649919164642296,0.9008805353662609,0.9568298611598732,0.9392406145661278,seg_sota_extension/stage2_final90_test/unet_mobilenetv2/minft/seed_71/last.pth
+dlv3p_efficientnetb0,minft,13,ok,0.7366984494320586,0.9299732531910448,0.7031594619583503,0.9019751188396352,0.9529635089688596,0.9441227735882312,seg_sota_extension/stage2_final90_test/dlv3p_efficientnetb0/minft/seed_13/last.pth
+dlv3p_efficientnetb0,minft,37,ok,0.7376400636888183,0.9318208060222389,0.7046431182944669,0.9040923250459991,0.9528221026986046,0.9465515666514371,seg_sota_extension/stage2_final90_test/dlv3p_efficientnetb0/minft/seed_37/last.pth
+dlv3p_efficientnetb0,minft,71,ok,0.739554731057281,0.9336696007188443,0.7063494099551334,0.9054136623323491,0.9530556638261913,0.9476999458802485,seg_sota_extension/stage2_final90_test/dlv3p_efficientnetb0/minft/seed_71/last.pth
+unet_efficientnetb0,minft,13,ok,0.7030132240347102,0.9331439313424372,0.6703698168945523,0.905660936748032,0.9564482353007899,0.9460356549035132,seg_sota_extension/stage2_final90_test/unet_efficientnetb0/minft/seed_13/last.pth
+unet_efficientnetb0,minft,37,ok,nan,0.19929203562830697,nan,0.19929203562830697,1.0,0.19929203562830697,seg_sota_extension/stage2_final90_test/unet_efficientnetb0/minft/seed_37/last.pth
+unet_efficientnetb0,minft,71,ok,0.6944494755803484,0.9330661611852392,0.6612748326783159,0.9052758612674949,0.9532944909661217,0.9479633219474185,seg_sota_extension/stage2_final90_test/unet_efficientnetb0/minft/seed_71/last.pth

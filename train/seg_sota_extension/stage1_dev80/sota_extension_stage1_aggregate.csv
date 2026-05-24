@@ -1,0 +1,4 @@
+model_name,regime,n_ok,mean_best_avg_last_k_soft,std_best_avg_last_k_soft
+unet_mobilenetv2,minft,3,0.7449057301178637,0.0021409001449852905
+dlv3p_efficientnetb0,minft,3,0.759189208842127,0.0003010438950185299
+unet_efficientnetb0,minft,3,0.7529089767965891,0.0003652590358001798
