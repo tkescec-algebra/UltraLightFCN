@@ -48,8 +48,6 @@ For artifact-assisted reproduction, consider publishing:
 | `train/seg_phase5/` | Phase 5 top-K outputs and Phase 5.1 ablation outputs. Ignored by `train/.gitignore` except tracked scripts under this tree. |
 | `train/seg_phase6/` | Phase 6 final outputs, no-SimCLR outputs, statistics, and simulations. Ignored by `train/.gitignore` except tracked scripts under this tree. |
 | `train/seg_sota/` | SOTA comparator outputs. Ignored by `train/.gitignore`. |
-| `train/seg_sota_extension/` | SOTA extension outputs. Ignored by `train/.gitignore`. |
-| `train/seg_experimental_ablation/` | Architecture-ablation outputs. Ignored by `train/.gitignore`. |
 | `test/bench_phase7/` | Desktop Phase 7 benchmark outputs and plots. Ignored by `test/.gitignore`. |
 | `test/bench_phase7_jetson_ts/` | TorchScript/Jetson benchmark outputs and plots. Ignored by `test/.gitignore`. |
 | `test/bds_sensitivity_analysis/bds_sensitivity_out/` | BDS sensitivity outputs. Ignored by `test/.gitignore`. |
@@ -67,7 +65,7 @@ Current tracked files matching generated-output patterns include:
 - `train/seg_phase6/ablation/phase6_simclr_vs_no_simclr_wilcoxon.py`.
 - `train/seg_phase6/wilcoxon_simulation.py`.
 
-Architecture-ablation and BDS outputs are present in ignored generated folders. Any decision to remove, keep, release, or reclassify these artifacts should be made by a human maintainer.
+BDS outputs are present in ignored generated folders. Any decision to remove, keep, release, or reclassify these artifacts should be made by a human maintainer.
 
 ## Policy
 

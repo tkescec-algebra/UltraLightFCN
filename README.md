@@ -80,9 +80,7 @@ See [docs/reproduction.md](docs/reproduction.md). There is no one-command reprod
 Present optional branches include:
 
 - SOTA comparators via `train/phaseSOTA_stage1_dev80.py`, `train/phaseSOTA_stage2_final90_test.py`, and `utils/sota_registry.py`.
-- SOTA extension via `train/phaseSOTA_extension_stage1_dev80.py`, `train/phaseSOTA_extension_stage2_final90_test.py`, and `utils/sota_registry_extension.py`.
 - no-SimCLR ablations via no-SimCLR Phase 4/5/6 scripts.
-- UltraLightFCN architecture ablations via `train/phase5_ultralight_arch_ablation_dev80.py`, `train/phase6_ultralight_arch_ablation_final90_test.py`, and `utils/ultralight_variant_registry.py`.
 - SimCLR augmentation ablation under `pretrain/aug_ablation/`.
 - UMAP, statistical, plotting, and BDS analysis scripts.
 

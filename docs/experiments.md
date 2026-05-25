@@ -29,22 +29,6 @@ The registry defines:
 
 Regimes are `minft` and `fullft`. These comparators are optional for reproducing UltraLightFCN training itself, but required for reproducing comparison tables/benchmark claims that include SOTA models.
 
-## SOTA Extension Path
-
-SOTA extension scripts are present:
-
-- `train/phaseSOTA_extension_stage1_dev80.py`
-- `train/phaseSOTA_extension_stage2_final90_test.py`
-- `utils/sota_registry_extension.py`
-
-The extension registry defines:
-
-- `unet_mobilenetv2`
-- `dlv3p_efficientnetb0`
-- `unet_efficientnetb0`
-
-Source comments/config indicate Stage 2 is restricted to `minft` only. This branch is optional unless a manuscript or report explicitly includes the extension results.
-
 ## no-SimCLR Ablation Path
 
 no-SimCLR scripts are present:
@@ -62,28 +46,6 @@ There are two Phase 6 variants:
 - A fixed-recipe no-SimCLR branch using the main Phase 5 recipe without loading the Phase 3 checkpoint.
 
 Which variant is public-facing requires a human interpretation decision.
-
-## Architecture Ablation Path
-
-Architecture ablation scripts and registries are present:
-
-- `train/phase5_ultralight_arch_ablation_dev80.py`
-- `train/phase6_ultralight_arch_ablation_final90_test.py`
-- `models/UltraLightFCN_experimental_variants.py`
-- `utils/ultralight_variant_registry.py`
-
-Discovered variants include:
-
-- `baseline`
-- `no_mini_aspp`
-- `no_shifted_sa`
-- `no_mini_aspp_no_sa`
-- `no_shallow_skip`
-- `no_dilation`
-- `decoder_narrow`
-- `decoder_wide`
-
-This branch is optional for main reproduction and requires careful handling because outputs exist under generated artifact folders.
 
 ## SimCLR Augmentation Ablation Path
 
@@ -117,9 +79,8 @@ Required for main UltraLightFCN reproduction:
 
 Optional for main model reproduction:
 
-- SOTA comparators and SOTA extension.
+- SOTA comparators.
 - no-SimCLR ablations.
-- Architecture ablations.
 - SimCLR augmentation ablation.
 - UMAP, statistical, plotting, and BDS sensitivity analyses.
 
@@ -127,5 +88,4 @@ Optional for main model reproduction:
 
 - Which no-SimCLR Phase 6 variant should be treated as the canonical public ablation?
 - Which generated CSV/JSON/figure artifacts are paper-facing release artifacts versus local outputs?
-- Whether SOTA extension results are part of the main manuscript or an appendix/supplement.
 - Whether tracked generated-looking files such as `pretrain/aug_ablation/train.pid` should remain tracked.

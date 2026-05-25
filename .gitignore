@@ -7,3 +7,15 @@ suplement/
 .venv/
 __pycache__/
 visualize_overlays.py
+
+# Backup experiments excluded from public-facing repository version
+models/UltraLightFCN_experimental_variants.py
+utils/ultralight_variant_registry.py
+utils/load_simclr_pretrain_encoder_experimental.py
+train/phase5_ultralight_arch_ablation_dev80.py
+train/phase6_ultralight_arch_ablation_final90_test.py
+train/seg_experimental_ablation/
+utils/sota_registry_extension.py
+train/phaseSOTA_extension_stage1_dev80.py
+train/phaseSOTA_extension_stage2_final90_test.py
+train/seg_sota_extension/
