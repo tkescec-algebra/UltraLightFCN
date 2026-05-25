@@ -69,11 +69,11 @@ class SOTAExtensionStage2Config:
     epochs: int = 60
     hard_thr: float = 0.5
 
-    num_workers: int = 8
+    num_workers: int = 0
     pin_memory: bool = True
     drop_last_train: bool = True
-    persistent_workers: bool = True
-    prefetch_factor: int = 2
+    persistent_workers: bool = False
+    prefetch_factor: int = None
 
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     deterministic: bool = False
